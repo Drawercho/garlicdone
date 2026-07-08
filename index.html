@@ -16,11 +16,11 @@
       <div class="run-info">
         <span id="stage-label">밭 1</span>
         <span id="plant-label">1 / 4</span>
-        <span id="lives" aria-label="남은 기회">● ● ●</span>
+        <span id="lives" aria-label="남은 기회">● ● ● ● ●</span>
       </div>
       <div class="score-wrap">
-        <span class="score-caption">점수</span>
-        <strong id="score">0</strong>
+        <span class="score-caption">수확 길이</span>
+        <strong id="score">0.0cm</strong>
         <span id="combo" class="combo">x1</span>
       </div>
     </header>
@@ -34,7 +34,7 @@
         <div id="power-needle" class="power-needle"></div>
       </div>
       <div class="sub-meters">
-        <div><span>속대 빠짐</span><i><b id="progress-fill"></b></i></div>
+        <div><span>마늘쫑 노출</span><i><b id="progress-fill"></b></i></div>
         <div><span>끊김 위험</span><i class="stress"><b id="stress-fill"></b></i></div>
       </div>
     </section>
@@ -44,7 +44,7 @@
         <div class="login-mark" aria-hidden="true">🌱</div>
         <p class="eyebrow">마늘밭 입장 명부</p>
         <h2>농부 이름을<br>알려주세요</h2>
-        <p>점수와 기록에 표시할 닉네임입니다.<br>이 기기에만 안전하게 저장돼요.</p>
+        <p>수확 길이와 월드 랭킹에 표시할 닉네임입니다.<br>이 기기에 저장돼요.</p>
         <form id="login-form" novalidate>
           <label for="nickname">닉네임</label>
           <input id="nickname" name="nickname" maxlength="10" autocomplete="nickname" placeholder="예: 쑥쑥농부" />
@@ -63,21 +63,22 @@
           <button id="ranking-button" class="secondary">🏆 랭킹</button>
           <button id="change-name-button" class="secondary quiet">농부 바꾸기</button>
         </div>
-        <div class="best-row">나의 최고 기록 <strong id="best-score">0</strong></div>
+        <div class="best-row">나의 최고 수확 <strong id="best-score">0.0cm</strong></div>
       </div>
 
       <div id="result-card" class="card result-card hidden">
         <p id="result-eyebrow" class="eyebrow">오늘 농사 끝!</p>
         <h2 id="result-title">수확 완료</h2>
-        <div id="final-score" class="final-score">0</div>
+        <div id="final-score" class="final-score">0.0cm</div>
         <p id="result-copy"></p>
         <button id="retry-button" class="primary">다시 뽑기</button>
         <button id="result-ranking-button" class="secondary wide">🏆 랭킹 확인</button>
       </div>
 
       <div id="ranking-card" class="card ranking-card hidden">
-        <p class="eyebrow">이 기기의 농부들</p>
+        <p class="eyebrow">월드 랭킹</p>
         <h2>마늘쫑 명예의 전당</h2>
+        <p id="ranking-status" class="ranking-status">월드 랭킹을 불러오는 중…</p>
         <div id="ranking-list" class="ranking-list"></div>
         <button id="ranking-back-button" class="secondary wide">돌아가기</button>
       </div>
@@ -86,7 +87,7 @@
     <div id="tutorial" class="tutorial hidden" aria-live="assertive">
       <span id="tutorial-step">1 / 3</span>
       <strong id="tutorial-title">꾹 잡고 위로</strong>
-      <p id="tutorial-copy">마늘쫑을 누른 채 천천히 위로 끌어올리세요.</p>
+      <p id="tutorial-copy">마늘쫑을 거의 풀어낸 뒤 손을 놓아 수확하세요.</p>
       <button id="skip-tutorial">알겠어요</button>
     </div>
 
@@ -95,6 +96,7 @@
     <button id="sound-button" class="sound-button" aria-label="소리 켜기 또는 끄기">♪</button>
   </main>
 
+  <script src="supabase-config.js" defer></script>
   <script src="game.js" defer></script>
 </body>
 </html>

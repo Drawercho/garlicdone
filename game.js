@@ -5,6 +5,12 @@
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
   const lerp = (a, b, t) => a + (b - a) * t;
   const easeOut = (t) => 1 - Math.pow(1 - clamp(t), 3);
+  const START_LIVES = 5;
+  const MAX_LIVES = 5;
+  const PLANTS_PER_STAGE = 4;
+  const MAX_STAGE = 12;
+  const formatCm = (value) => `${Number(value || 0).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}cm`;
+  const scoreValue = (row) => Number(row?.cm ?? row?.score ?? 0);
 
   class RNG {
     constructor(seed = Date.now()) { this.seed = seed >>> 0; }
@@ -108,10 +114,10 @@
   }
 
   const TYPES = {
-    fresh: { name: '싱싱한 마늘쫑', color: '#4cae50', dark: '#26763f', width: 1, score: 1, pattern: 'wave' },
-    stubborn: { name: '고집센 마늘쫑', color: '#3e9b4b', dark: '#1d6337', width: 1.18, score: 1.15, pattern: 'steps' },
-    dancer: { name: '춤추는 마늘쫑', color: '#69b94b', dark: '#34743b', width: .92, score: 1.25, pattern: 'zigzag' },
-    golden: { name: '황금 마늘쫑', color: '#e4ae32', dark: '#a87323', width: 1.08, score: 2, pattern: 'pulse' }
+    fresh: { name: '싱싱한 마늘쫑', color: '#4cae50', dark: '#26763f', width: 1, cmBonus: 1, pattern: 'wave' },
+    stubborn: { name: '고집센 마늘쫑', color: '#3e9b4b', dark: '#1d6337', width: 1.18, cmBonus: 1.05, pattern: 'steps' },
+    dancer: { name: '춤추는 마늘쫑', color: '#69b94b', dark: '#34743b', width: .92, cmBonus: 1.08, pattern: 'zigzag' },
+    golden: { name: '황금 마늘쫑', color: '#e4ae32', dark: '#a87323', width: 1.08, cmBonus: 1.35, pattern: 'pulse' }
   };
 
   class Plant {
@@ -121,12 +127,16 @@
       this.key = golden ? 'golden' : rng.pick(pool);
       this.type = TYPES[this.key];
       this.seed = rng.range(0, 100);
-      this.difficulty = clamp((stage - 1) / 14, 0, .78);
+      this.difficulty = clamp((stage - 1) / (MAX_STAGE + 2), 0, .82);
       this.baseForce = rng.range(.39, .53) + this.difficulty * .08;
       this.band = Math.max(.105, rng.range(.155, .205) - this.difficulty * .07);
       this.danger = clamp(this.baseForce + this.band + rng.range(.14, .2), .72, .9);
       this.speed = rng.range(.72, 1.08) + this.difficulty * .75;
       this.angleStrength = rng.range(.22, .42) + this.difficulty * .14;
+      this.lengthCm = rng.range(31, 43) + Math.min(stage - 1, MAX_STAGE - 1) * rng.range(.55, 1.05);
+      if (this.key === 'stubborn') this.lengthCm += 2.2;
+      if (this.key === 'dancer') this.lengthCm += 1.1;
+      if (this.key === 'golden') this.lengthCm += 4.5;
       if (this.key === 'dancer') this.angleStrength += .17;
       if (this.key === 'stubborn') { this.band *= .9; this.baseForce += .04; }
       if (this.key === 'golden') { this.band *= .78; this.speed *= 1.1; }
@@ -142,7 +152,9 @@
       this.resolved = false;
       this.outcomeTime = 0;
       this.perfect = false;
-      this.score = 0;
+      this.cm = 0;
+      this.releaseReady = false;
+      this.releaseQuality = 0;
       this.tremor = 0;
       this.slipPulse = 0;
     }
@@ -172,6 +184,76 @@
     }
   }
 
+  class SupabaseRanking {
+    constructor(config = {}) {
+      this.url = String(config.url || '').replace(/\/+$/, '');
+      this.anonKey = String(config.anonKey || config.key || '');
+      this.table = String(config.table || 'garlic_rankings');
+      this.enabled = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(this.url) && this.anonKey.length > 20;
+      this.lastError = '';
+    }
+    endpoint(query = '') {
+      return `${this.url}/rest/v1/${encodeURIComponent(this.table)}${query}`;
+    }
+    headers(extra = {}) {
+      return {
+        apikey: this.anonKey,
+        Authorization: `Bearer ${this.anonKey}`,
+        'Content-Type': 'application/json',
+        ...extra
+      };
+    }
+    normalize(row) {
+      return {
+        name: String(row.name || '농부').slice(0, 10),
+        cm: Number(row.cm ?? row.score ?? 0),
+        stage: Number(row.stage || 1),
+        combo: Number(row.combo || 0),
+        harvested: Number(row.harvested || 0),
+        perfectCount: Number(row.perfect_count ?? row.perfectCount ?? 0),
+        time: row.created_at ? new Date(row.created_at).getTime() : Number(row.time || Date.now())
+      };
+    }
+    async fetchTop() {
+      if (!this.enabled) return { ok: false, rows: [], error: 'Supabase 설정이 아직 비어 있어요.' };
+      try {
+        const params = '?select=name,cm,stage,combo,harvested,perfect_count,created_at&order=cm.desc,created_at.asc&limit=30';
+        const res = await fetch(this.endpoint(params), { headers: this.headers({ Accept: 'application/json' }) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const rows = await res.json();
+        this.lastError = '';
+        return { ok: true, rows: rows.map((row) => this.normalize(row)), error: '' };
+      } catch (err) {
+        this.lastError = err?.message || '랭킹을 불러오지 못했어요.';
+        return { ok: false, rows: [], error: this.lastError };
+      }
+    }
+    async submit(entry) {
+      if (!this.enabled) return { ok: false, error: 'Supabase 설정이 아직 비어 있어요.' };
+      const body = {
+        name: String(entry.name || '농부').trim().slice(0, 10),
+        cm: Number(Number(entry.cm || 0).toFixed(1)),
+        stage: Math.max(1, Math.min(MAX_STAGE, Number(entry.stage || 1))),
+        combo: Math.max(0, Math.min(PLANTS_PER_STAGE * MAX_STAGE, Number(entry.combo || 0))),
+        harvested: Math.max(0, Math.min(PLANTS_PER_STAGE * MAX_STAGE, Number(entry.harvested || 0))),
+        perfect_count: Math.max(0, Math.min(PLANTS_PER_STAGE * MAX_STAGE, Number(entry.perfectCount || 0)))
+      };
+      try {
+        const res = await fetch(this.endpoint(), {
+          method: 'POST',
+          headers: this.headers({ Prefer: 'return=minimal' }),
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        this.lastError = '';
+        return { ok: true, error: '' };
+      } catch (err) {
+        this.lastError = err?.message || '기록을 저장하지 못했어요.';
+        return { ok: false, error: this.lastError };
+      }
+    }
+  }
+
   class Game {
     constructor() {
       this.canvas = $('game');
@@ -179,9 +261,11 @@
       this.sound = new Sound();
       this.rng = new RNG();
       this.profile = this.readStored('garlic-profile', null);
-      this.rankings = this.readStored('garlic-rankings', []);
+      this.worldRanking = new SupabaseRanking(globalThis.GARLIC_WORLD_RANKING || globalThis.window?.GARLIC_WORLD_RANKING || {});
+      this.rankings = this.readStored('garlic-world-cache', this.readStored('garlic-rankings', []));
+      this.rankingStatus = this.worldRanking.enabled ? '월드 랭킹을 불러오는 중…' : 'Supabase 연결 대기 중';
       this.state = this.profile ? 'title' : 'login';
-      this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.lives = 3;
+      this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES;
       this.best = Number(localStorage.getItem('garlic-best') || 0);
       this.plant = new Plant(1, 0, this.rng);
       this.particles = [];
@@ -199,7 +283,7 @@
       this.input = { held: false, power: 0, angle: 0, pointerId: null, x: 0, y: 0, grabX: 0, grabY: 0, grabAngle: 0, keyboard: false };
       this.keys = new Set();
       this.bind(); this.resize(); this.updateUI();
-      $('best-score').textContent = this.best.toLocaleString('ko-KR');
+      $('best-score').textContent = formatCm(this.best);
       $('sound-button').classList.toggle('muted', this.sound.muted);
       if (this.profile) this.showTitle(); else this.showLogin();
       requestAnimationFrame((t) => this.loop(t));
@@ -235,11 +319,11 @@
       this.state = 'title'; this.showCard('start-card'); this.hideTutorial();
       const name = this.profile?.name || '농부';
       $('farmer-name').textContent = name; $('hud-player').textContent = `· ${name}`;
-      $('best-score').textContent = this.best.toLocaleString('ko-KR');
+      $('best-score').textContent = formatCm(this.best);
     }
     showRanking(returnState = this.state) {
       this.rankReturnState = returnState === 'gameover' ? 'gameover' : 'title';
-      this.state = 'ranking'; this.renderRanking(); this.showCard('ranking-card');
+      this.state = 'ranking'; this.renderRanking(); this.showCard('ranking-card'); this.refreshWorldRanking();
     }
     closeRanking() {
       if (this.rankReturnState === 'gameover') {
@@ -248,24 +332,65 @@
     }
     renderRanking() {
       const list = $('ranking-list');
-      const rows = [...this.rankings].sort((a, b) => b.score - a.score || b.time - a.time).slice(0, 10);
+      const status = $('ranking-status');
+      if (status) status.textContent = this.rankingStatus;
+      const rows = (this.worldRanking.enabled ? [...this.rankings] : [])
+        .sort((a, b) => scoreValue(b) - scoreValue(a) || b.time - a.time)
+        .slice(0, 10);
       if (!rows.length) {
-        list.innerHTML = '<div class="rank-empty">아직 기록이 없어요.<br>첫 번째 전설이 되어보세요!</div>'; return;
+        list.innerHTML = `<div class="rank-empty">${this.worldRanking.enabled ? '아직 기록이 없어요.<br>첫 번째 세계 기록을 남겨보세요!' : 'Supabase 연결을 기다리는 중이에요.<br>설정 후 월드 랭킹이 열립니다.'}</div>`; return;
       }
       const medals = ['🥇', '🥈', '🥉'];
       const escape = (value) => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
       list.innerHTML = rows.map((row, index) => {
         const mine = row.name === this.profile?.name ? ' me' : '';
         const date = new Date(row.time).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
-        return `<div class="rank-row${mine}"><span class="rank-pos">${medals[index] || index + 1}</span><span class="rank-name">${escape(row.name)}<small>밭 ${row.stage} · ${date}</small></span><strong class="rank-score">${Number(row.score).toLocaleString('ko-KR')}</strong></div>`;
+        return `<div class="rank-row${mine}"><span class="rank-pos">${medals[index] || index + 1}</span><span class="rank-name">${escape(row.name)}<small>밭 ${row.stage} · ${row.harvested || 0}줄기 · ${date}</small></span><strong class="rank-score">${formatCm(scoreValue(row))}</strong></div>`;
       }).join('');
+    }
+    async refreshWorldRanking() {
+      if (!this.worldRanking.enabled) {
+        this.rankingStatus = 'Supabase URL과 anon public key를 넣으면 월드 랭킹으로 전환됩니다.';
+        if (this.state === 'ranking') this.renderRanking();
+        return;
+      }
+      this.rankingStatus = '월드 랭킹을 불러오는 중…';
+      if (this.state === 'ranking') this.renderRanking();
+      const result = await this.worldRanking.fetchTop();
+      if (result.ok) {
+        this.rankings = result.rows;
+        localStorage.setItem('garlic-world-cache', JSON.stringify(this.rankings));
+        this.rankingStatus = '전 세계 농부 기록';
+      } else {
+        this.rankingStatus = `월드 랭킹 연결 실패 · ${result.error}`;
+      }
+      if (this.state === 'ranking') this.renderRanking();
     }
     saveRunToRanking() {
       if (this.runSaved || !this.profile || this.score <= 0) return;
       this.runSaved = true;
-      this.rankings.push({ name: this.profile.name, score: this.score, stage: this.stage, combo: this.maxCombo, time: Date.now() });
-      this.rankings = this.rankings.sort((a, b) => b.score - a.score || b.time - a.time).slice(0, 50);
-      localStorage.setItem('garlic-rankings', JSON.stringify(this.rankings));
+      const entry = {
+        name: this.profile.name,
+        cm: Number(this.score.toFixed(1)),
+        stage: this.stage,
+        combo: this.maxCombo,
+        harvested: this.harvested,
+        perfectCount: this.perfectCount,
+        time: Date.now()
+      };
+      this.rankings.push(entry);
+      this.rankings = this.rankings.sort((a, b) => scoreValue(b) - scoreValue(a) || b.time - a.time).slice(0, 50);
+      localStorage.setItem('garlic-world-cache', JSON.stringify(this.rankings));
+      if (!this.worldRanking.enabled) {
+        this.rankingStatus = 'Supabase 설정 전이라 이 기록은 임시로 이 기기에만 보관됐어요.';
+        return;
+      }
+      this.rankingStatus = '월드 랭킹에 기록을 올리는 중…';
+      this.worldRanking.submit(entry).then((result) => {
+        this.rankingStatus = result.ok ? '월드 랭킹에 기록이 올라갔어요.' : `월드 랭킹 저장 실패 · ${result.error}`;
+        if (result.ok) this.refreshWorldRanking();
+        else if (this.state === 'ranking') this.renderRanking();
+      });
     }
     bind() {
       addEventListener('resize', () => this.resize());
@@ -313,7 +438,7 @@
     start() {
       this.sound.init();
       this.rng = new RNG(Date.now());
-      this.state = 'playing'; this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.lives = 3; this.runSaved = false;
+      this.state = 'playing'; this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES; this.runSaved = false; this.completed = false;
       this.time = 0; this.particles.length = 0; this.transitionTimer = 0; this.stageBanner = 1.5;
       this.input.power = 0; this.input.angle = 0; this.input.held = false;
       this.plant = new Plant(this.stage, this.plantNo - 1, this.rng);
@@ -352,15 +477,40 @@
       if (!this.input.keyboard && (this.input.pointerId === e.pointerId || e.pointerId == null)) this.releaseInput();
     }
     releaseInput() {
+      const shouldResolve = this.state === 'playing' && this.input.held && !this.plant.resolved && (this.input.power > .12 || this.plant.progress > .08);
       if (this.input.held && this.input.power > .35) this.sound.release();
+      if (shouldResolve) this.releaseHarvest();
       this.input.held = false; this.input.pointerId = null; this.canvas.classList.remove('grabbing');
+    }
+    releaseHarvest() {
+      const p = this.plant;
+      if (p.resolved) return;
+      const target = p.targetForce(this.time);
+      const desired = p.targetAngle(this.time);
+      const power = this.input.power;
+      const forceQ = clamp(1 - Math.abs(power - target) / p.band);
+      const angleQ = clamp(1 - Math.abs(this.input.angle - desired) / .72);
+      const quality = forceQ * (.35 + .65 * angleQ);
+      p.releaseQuality = quality;
+
+      if (p.progress < .68) {
+        this.fail(`아직 ${formatCm(p.progress * p.lengthCm)}밖에 안 빠졌어요 · 조금 더 풀어낸 뒤 놓으세요`);
+      } else if (power > p.danger + .035 || p.stress > .92) {
+        this.fail('놓는 순간 힘이 너무 세서 마늘쫑이 끊어졌어요');
+      } else if (quality < .42) {
+        if (angleQ < .45) this.fail('마지막 각도가 틀어져 잎대 안에서 걸렸어요');
+        else if (power < target - p.band) this.fail('마지막 힘이 약해 다시 안쪽으로 미끄러졌어요');
+        else this.fail('마지막 힘이 거칠어 마늘쫑이 상했어요');
+      } else {
+        this.succeed();
+      }
     }
     showTutorial(step) {
       this.tutorialStep = step;
       const data = [
-        ['꾹 잡고 위로', '줄기를 누른 채 천천히 위로 끌어 힘을 주세요.'],
+        ['꾹 잡고 위로', '마늘쫑을 누른 채 천천히 위로 끌어 힘을 주세요.'],
         ['지금 필요한 쪽으로', '안내는 현재 위치에서 더 움직일 방향입니다. 체크가 뜨면 그대로 유지하세요.'],
-        ['빨개지면 힘 빼기', '끊김 위험이 차오르면 아래로 내려 잠깐 쉬세요.']
+        ['준비되면 손 놓기', '마늘쫑이 거의 빠져나오면 힘과 각도를 맞춘 채 손을 놓아 수확하세요.']
       ][step];
       $('tutorial-step').textContent = `${step + 1} / 3`;
       $('tutorial-title').textContent = data[0]; $('tutorial-copy').textContent = data[1];
@@ -373,12 +523,17 @@
     updateTutorial() {
       if (this.tutorialStep === 0 && this.input.power > .3) this.showTutorial(1);
       if (this.tutorialStep === 1 && this.plant.progress > .12) this.showTutorial(2);
-      if (this.tutorialStep === 2 && this.plant.progress > .38) this.finishTutorial();
+      if (this.tutorialStep === 2 && this.plant.progress > .72) this.finishTutorial();
     }
     nextPlant() {
       this.plantNo++;
-      if (this.plantNo > 4) {
-        this.stage++; this.plantNo = 1; this.stageBanner = 1.8; this.lives = Math.min(3, this.lives + 1);
+      if (this.plantNo > PLANTS_PER_STAGE) {
+        if (this.stage >= MAX_STAGE) {
+          this.completed = true;
+          this.gameOver();
+          return;
+        }
+        this.stage++; this.plantNo = 1; this.stageBanner = 1.8; this.lives = Math.min(MAX_LIVES, this.lives + 1);
         this.sound.stage(); this.toast(`밭 ${this.stage} · 기회 +1`, 'good');
       }
       this.plant = new Plant(this.stage, this.plantNo - 1, this.rng);
@@ -427,7 +582,7 @@
       if (inZone) {
         const gain = (.085 + .115 * quality) * (1 + Math.min(this.stage, 10) * .012);
         const previousStep = Math.floor(p.progress * 8);
-        p.progress = clamp(p.progress + gain * dt);
+        p.progress = clamp(p.progress + gain * dt, 0, .965);
         const currentStep = Math.floor(p.progress * 8);
         if (currentStep > previousStep && currentStep < 8) {
           p.slipPulse = 1; this.shake = Math.max(this.shake, 1.7);
@@ -435,7 +590,8 @@
         }
         p.accuracySum += quality * dt; p.accuracyTime += dt;
         const angleError = desired - this.input.angle;
-        p.feedback = quality > .78 ? '맞았어요 · 그대로 유지!' : angleQ < .62 ? (angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →') : '힘을 미세하게 맞춰요';
+        p.releaseReady = p.progress > .82 && quality > .48;
+        p.feedback = p.releaseReady ? '지금 손 놓으면 쑤욱!' : quality > .78 ? '맞았어요 · 그대로 유지!' : angleQ < .62 ? (angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →') : '힘을 미세하게 맞춰요';
         this.sound.tension(quality);
         if (!p.lastZone && quality > .55) this.burst(this.w / 2, this.h * .665, 'soil', 5);
       } else if (this.input.held && power > .08) {
@@ -443,8 +599,10 @@
         if (power < target - p.band) p.feedback = '힘이 부족해요 · 더 위로';
         else if (power > target + p.band) p.feedback = '너무 세요! 힘을 빼세요';
         else p.feedback = angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →';
+        p.releaseReady = false;
         p.progress = Math.max(0, p.progress - dt * .009);
       } else {
+        p.releaseReady = false;
         p.feedback = p.stress > .16 ? '쉬는 중 · 위험이 내려가요' : '잡고 천천히 당겨요';
         p.progress = Math.max(0, p.progress - dt * .005);
       }
@@ -469,27 +627,30 @@
       p.slipPulse = Math.max(0, (p.slipPulse || 0) - dt * 5.5);
       p.lastZone = inZone;
 
-      if (p.stress >= 1) this.fail(power > p.danger ? '너무 세게 당겨 마늘쫑이 끊어졌어요' : '반대 각도로 비틀어 속대 안에서 걸렸어요');
-      else if (p.progress >= 1) this.succeed();
+      if (p.stress >= 1) this.fail(power > p.danger ? '너무 세게 당겨 마늘쫑이 끊어졌어요' : '반대 각도로 비틀어 잎대 안에서 걸렸어요');
       this.updateUI(target);
     }
     succeed() {
       const p = this.plant; if (p.resolved) return;
       const accuracy = p.accuracyTime ? p.accuracySum / p.accuracyTime : 0;
+      const finishQuality = p.releaseQuality || accuracy;
+      const handling = clamp(accuracy * .54 + finishQuality * .46);
       const speedBonus = clamp(1 - (p.activeTime - 5) / 14);
-      p.perfect = accuracy > .78 && p.peakStress < .5 && p.activeTime < 13;
+      p.perfect = handling > .8 && p.peakStress < .5 && p.activeTime < 13 && p.progress > .88;
       this.combo++;
       this.maxCombo = Math.max(this.maxCombo, this.combo); this.harvested++;
-      const comboMult = 1 + Math.min(this.combo - 1, 10) * .14;
-      const base = 450 + accuracy * 650 + speedBonus * 280 + (p.perfect ? 500 : 0);
-      p.score = Math.round(base * comboMult * p.type.score / 10) * 10;
-      this.score += p.score; p.resolved = true; p.outcomeTime = 0;
+      if (p.perfect) this.perfectCount++;
+      const comboCm = Math.min(this.combo - 1, 12) * .35;
+      const usableLength = p.lengthCm * (.82 + handling * .18);
+      const finishCm = speedBonus * 1.1 + (p.perfect ? 3.2 : 0);
+      p.cm = Math.round((usableLength * p.type.cmBonus + comboCm + finishCm) * 10) / 10;
+      this.score = Math.round((this.score + p.cm) * 10) / 10; p.resolved = true; p.outcomeTime = 0;
       this.input.held = false; this.canvas.classList.remove('grabbing');
       this.shake = p.perfect ? 14 : 9; this.flash = 1; this.slow = .25;
       this.sound.success(p.perfect);
       if (navigator.vibrate) navigator.vibrate(p.perfect ? [25, 25, 70] : [20, 20, 45]);
       this.burst(this.w / 2, this.h * .59, p.perfect ? 'perfect' : 'success', p.perfect ? 58 : 36);
-      this.popScore(`${p.perfect ? '완벽 뽑기! ' : '쑤욱! '}+${p.score.toLocaleString('ko-KR')}`);
+      this.popScore(`${p.perfect ? '완벽 뽑기! ' : '쑤욱! '}+${formatCm(p.cm)}`);
       this.toast(p.perfect ? '손맛 최고! 온전한 한 줄기' : `${p.type.name} 수확!`, 'good');
       this.saveBest(); this.updateUI();
     }
@@ -504,16 +665,16 @@
     gameOver() {
       const isNewBest = this.score > this.best;
       this.state = 'gameover'; this.saveBest(); this.saveRunToRanking(); this.hideTutorial();
-      $('result-title').textContent = isNewBest && this.score > 0 ? '새로운 최고 기록!' : '오늘 수확 끝!';
-      $('final-score').textContent = this.score.toLocaleString('ko-KR');
-      $('result-copy').textContent = `${this.profile?.name || '농부'}님은 마늘쫑 ${this.harvested}줄기를 수확해 밭 ${this.stage}까지 도착했습니다.`;
-      $('result-eyebrow').textContent = `최고 기록 ${this.best.toLocaleString('ko-KR')}`;
+      $('result-title').textContent = this.completed ? '만렙 밭 완주!' : isNewBest && this.score > 0 ? '새로운 최고 기록!' : '오늘 수확 끝!';
+      $('final-score').textContent = formatCm(this.score);
+      $('result-copy').textContent = `${this.profile?.name || '농부'}님은 마늘쫑 ${this.harvested}줄기를 ${formatCm(this.score)} 수확해 밭 ${this.stage}/${MAX_STAGE}까지 도착했습니다.`;
+      $('result-eyebrow').textContent = `최고 기록 ${formatCm(this.best)}`;
       $('result-card').classList.remove('hidden'); $('start-card').classList.add('hidden');
       $('overlay').classList.add('visible'); $('meter-panel').classList.add('hidden-panel');
     }
     saveBest() {
       if (this.score > this.best) { this.best = this.score; localStorage.setItem('garlic-best', String(this.best)); }
-      $('best-score').textContent = this.best.toLocaleString('ko-KR');
+      $('best-score').textContent = formatCm(this.best);
     }
     burst(x, y, kind, count) {
       const presets = {
@@ -535,10 +696,10 @@
     }
     updateUI(target = this.plant.targetForce(this.time)) {
       const p = this.plant;
-      $('stage-label').textContent = `밭 ${this.stage}`;
-      $('plant-label').textContent = `${this.plantNo} / 4${p.key === 'golden' ? ' · 황금!' : ''}`;
-      $('lives').textContent = `${'● '.repeat(this.lives)}${'○ '.repeat(Math.max(0, 3 - this.lives))}`.trim();
-      $('score').textContent = this.score.toLocaleString('ko-KR');
+      $('stage-label').textContent = `밭 ${this.stage}/${MAX_STAGE}`;
+      $('plant-label').textContent = `${this.plantNo} / ${PLANTS_PER_STAGE}${p.key === 'golden' ? ' · 황금!' : ''}`;
+      $('lives').textContent = `${'● '.repeat(this.lives)}${'○ '.repeat(Math.max(0, MAX_LIVES - this.lives))}`.trim();
+      $('score').textContent = formatCm(this.score);
       $('hud-player').textContent = this.profile ? `· ${this.profile.name}` : '';
       $('combo').textContent = `x${this.combo + 1}`; $('combo').classList.toggle('active', this.combo > 0);
       $('action-hint').textContent = p.resolved ? (p.failReason ? '다음 마늘쫑 준비 중…' : '기분 좋게 쑤욱!') : p.feedback;
@@ -694,7 +855,7 @@
         ctx.save(); ctx.strokeStyle = 'rgba(255,249,211,.9)'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(x + side * 17, sheathTop - 2); ctx.lineTo(labelX - side * 52, labelY - 8); ctx.stroke();
         ctx.fillStyle = 'rgba(38,74,42,.88)'; ctx.beginPath(); ctx.roundRect(labelX - 56, labelY - 24, 112, 32, 12); ctx.fill();
-        ctx.fillStyle = '#fff9d9'; ctx.textAlign = 'center'; ctx.font = '800 12px sans-serif'; ctx.fillText('잎대 속 마늘쫑', labelX, labelY - 4); ctx.restore();
+        ctx.fillStyle = '#fff9d9'; ctx.textAlign = 'center'; ctx.font = '800 12px sans-serif'; ctx.fillText('마늘쫑만 쑥', labelX, labelY - 4); ctx.restore();
       }
 
       if (!p.resolved) {
@@ -743,7 +904,7 @@
         ctx.restore();
       }
       if (this.plant.key === 'golden' && !this.plant.resolved && this.state === 'playing') {
-        ctx.save(); ctx.globalAlpha = .65 + Math.sin(this.time * 5) * .2; ctx.fillStyle = '#fff1a2'; ctx.textAlign = 'center'; ctx.font = '900 16px sans-serif'; ctx.fillText('✦ 황금 마늘쫑 · 점수 2배 ✦', this.w / 2, this.h * .13); ctx.restore();
+        ctx.save(); ctx.globalAlpha = .65 + Math.sin(this.time * 5) * .2; ctx.fillStyle = '#fff1a2'; ctx.textAlign = 'center'; ctx.font = '900 16px sans-serif'; ctx.fillText('✦ 황금 마늘쫑 · 희귀 장줄기 ✦', this.w / 2, this.h * .13); ctx.restore();
       }
       if (this.flash > 0) { ctx.fillStyle = `rgba(255,255,220,${this.flash * .38})`; ctx.fillRect(0,0,this.w,this.h); }
     }

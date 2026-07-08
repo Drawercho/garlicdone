@@ -22,9 +22,19 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Prepare game files
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           mkdir _site
           cp index.html styles.css game.js _site/
+          cat > _site/supabase-config.js <<EOF
+          window.GARLIC_WORLD_RANKING = {
+            url: '${SUPABASE_URL}',
+            anonKey: '${SUPABASE_ANON_KEY}',
+            table: 'garlic_rankings'
+          };
+          EOF
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

@@ -216,6 +216,7 @@ h1 em { color: #e67c3b; font-style: normal; text-shadow: 0 5px 0 #f4cb65; }
 
 .ranking-card { width: min(470px, 100%); padding-bottom: 23px; }
 .ranking-card h2 { font-size: clamp(28px, 6vw, 38px); }
+.ranking-status { min-height: 18px; margin: 9px 0 -5px; color: #778163; font-size: 11px; font-weight: 800; line-height: 1.4; }
 .ranking-list { display: grid; gap: 7px; min-height: 130px; max-height: min(46vh, 390px); margin: 19px 0 8px; overflow: auto; padding: 2px; }
 .rank-row { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid #ddd5a9; border-radius: 13px; background: rgba(255,255,255,.48); text-align: left; }
 .rank-row.me { border-color: #7dbb62; background: #edf5cf; }

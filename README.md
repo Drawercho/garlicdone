@@ -14,15 +14,28 @@ python3 -m http.server 8080
 
 ## 조작
 
-- 마우스/터치: 마늘쫑을 누른 채 위로 당겨 힘 조절, 좌우로 움직여 각도 조절
-- 키보드: `Space`를 누른 채 `↑/↓`로 힘 조절, `←/→`로 각도 조절
+- 마우스/터치: 마늘쫑을 누른 채 위로 당겨 힘 조절, 좌우로 움직여 각도 조절, 준비됐을 때 손을 놓아 수확
+- 키보드: `Space`를 누른 채 `↑/↓`로 힘 조절, `←/→`로 각도 조절, 준비됐을 때 `Space`를 놓아 수확
 - 위험 게이지가 오르면 힘을 잠시 빼서 회복
 
-닉네임, 최고 점수와 랭킹은 현재 브라우저에 자동 저장됩니다. 랭킹은 로그인 서버를 사용하지 않는 기기 내 랭킹입니다.
+기록은 단순 점수가 아니라 누적 수확 길이 `cm`로 표시됩니다. 목숨은 전체 5개, 만렙은 밭 12입니다.
+
+## 월드 랭킹 연결
+
+Supabase Dashboard의 SQL Editor에서 `supabase-schema.sql`을 한 번 실행하세요.
+
+그 다음 `supabase-config.js`에 아래 값을 넣으면 GitHub Pages에서도 월드 랭킹이 동작합니다.
+
+- `url`: Supabase Project URL
+- `anonKey`: Supabase `anon public` key
+
+GitHub Pages 배포판은 저장소 Settings > Secrets and variables > Actions에 `SUPABASE_URL`, `SUPABASE_ANON_KEY`를 추가하면 배포 시 `supabase-config.js`가 자동으로 생성됩니다.
+
+`service_role` 키는 절대 브라우저 코드에 넣지 마세요. 랭킹 테이블은 RLS로 공개 읽기와 점수 제출만 허용합니다.
 
 ## 점검
 
-핵심 성공·실패·점수·콤보·기록 저장 로직은 아래 명령으로 빠르게 확인할 수 있습니다.
+핵심 성공·실패·cm 기록·콤보·랭킹 저장 로직은 아래 명령으로 빠르게 확인할 수 있습니다.
 
 ```bash
 node tests/smoke.js

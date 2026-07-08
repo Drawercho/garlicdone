@@ -47,16 +47,17 @@ game.enterFarm('테스트농부');
 assert.equal(JSON.parse(localStorage.getItem('garlic-profile')).name, '테스트농부', 'nickname should persist');
 game.start();
 
-for (let i = 0; i < 1200 && !game.plant.resolved; i++) {
+for (let i = 0; i < 1200 && game.plant.progress < .9; i++) {
   game.input.held = true;
   game.input.power = game.plant.targetForce(game.time);
   game.input.angle = game.plant.targetAngle(game.time);
   game.update(1 / 60);
 }
+game.releaseInput();
 
-assert.equal(game.plant.resolved, true, 'skillful input should pull the plant');
+assert.equal(game.plant.resolved, true, 'skillful release should pull the scape');
 assert.equal(game.plant.failReason, '', 'skillful input should not fail');
-assert.ok(game.score > 0, 'success should award score');
+assert.ok(game.score > 0, 'success should award harvested centimeters');
 assert.ok(game.combo > 0, 'success should build combo');
 assert.ok(Number(localStorage.getItem('garlic-best')) > 0, 'best score should persist');
 
@@ -82,8 +83,8 @@ assert.equal(game.lives, livesBefore - 1, 'failure should consume one chance');
 assert.equal(game.combo, 0, 'failure should reset combo');
 
 game.gameOver();
-const ranking = JSON.parse(localStorage.getItem('garlic-rankings'));
+const ranking = JSON.parse(localStorage.getItem('garlic-world-cache'));
 assert.equal(ranking[0].name, '테스트농부', 'ranking should use the active nickname');
-assert.ok(ranking[0].score > 0, 'ranking should save a completed score');
+assert.ok(ranking[0].cm > 0, 'ranking should save harvested centimeters');
 
-console.log('Smoke test passed: login, success, failure, scoring, ranking, and record storage.');
+console.log('Smoke test passed: login, release harvest, failure, cm scoring, ranking, and record storage.');
