@@ -12,7 +12,7 @@
     <canvas id="game" width="960" height="640" aria-label="게임 화면"></canvas>
 
     <header class="hud" aria-live="polite">
-      <div class="brand"><span>🌱</span> 마늘쫑 뽑기</div>
+      <div class="brand"><span>🌱</span> 마늘쫑 뽑기 <small id="hud-player"></small></div>
       <div class="run-info">
         <span id="stage-label">밭 1</span>
         <span id="plant-label">1 / 4</span>
@@ -40,12 +40,30 @@
     </section>
 
     <section id="overlay" class="overlay visible">
-      <div id="start-card" class="card start-card">
+      <div id="login-card" class="card login-card">
+        <div class="login-mark" aria-hidden="true">🌱</div>
+        <p class="eyebrow">마늘밭 입장 명부</p>
+        <h2>농부 이름을<br>알려주세요</h2>
+        <p>점수와 기록에 표시할 닉네임입니다.<br>이 기기에만 안전하게 저장돼요.</p>
+        <form id="login-form" novalidate>
+          <label for="nickname">닉네임</label>
+          <input id="nickname" name="nickname" maxlength="10" autocomplete="nickname" placeholder="예: 쑥쑥농부" />
+          <span id="nickname-error" class="field-error"></span>
+          <button class="primary" type="submit">마늘밭 입장하기</button>
+        </form>
+      </div>
+
+      <div id="start-card" class="card start-card hidden">
         <p class="eyebrow">손끝 농사 아케이드</p>
+        <div class="farmer-welcome"><span id="farmer-name">농부</span>님, 오늘도 한 줄기!</div>
         <h1>힘주어, 조심히.<br><em>쑤욱!</em></h1>
         <p>땅에 남는 마늘 잎대의 중심에서 마늘쫑만 쏙 뽑아냅니다. 위로 당겨 힘을 주고, 기우는 방향에 맞춰 좌우로 움직이세요.</p>
         <button id="start-button" class="primary">첫 마늘쫑 잡기</button>
-        <div class="best-row">최고 기록 <strong id="best-score">0</strong></div>
+        <div class="menu-row">
+          <button id="ranking-button" class="secondary">🏆 랭킹</button>
+          <button id="change-name-button" class="secondary quiet">농부 바꾸기</button>
+        </div>
+        <div class="best-row">나의 최고 기록 <strong id="best-score">0</strong></div>
       </div>
 
       <div id="result-card" class="card result-card hidden">
@@ -54,6 +72,14 @@
         <div id="final-score" class="final-score">0</div>
         <p id="result-copy"></p>
         <button id="retry-button" class="primary">다시 뽑기</button>
+        <button id="result-ranking-button" class="secondary wide">🏆 랭킹 확인</button>
+      </div>
+
+      <div id="ranking-card" class="card ranking-card hidden">
+        <p class="eyebrow">이 기기의 농부들</p>
+        <h2>마늘쫑 명예의 전당</h2>
+        <div id="ranking-list" class="ranking-list"></div>
+        <button id="ranking-back-button" class="secondary wide">돌아가기</button>
       </div>
     </section>
 

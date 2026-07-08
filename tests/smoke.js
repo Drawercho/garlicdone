@@ -43,6 +43,8 @@ vm.runInThisContext(source, { filename: 'game.js' });
 
 const game = global.testGame;
 game.tutorialDone = true;
+game.enterFarm('테스트농부');
+assert.equal(JSON.parse(localStorage.getItem('garlic-profile')).name, '테스트농부', 'nickname should persist');
 game.start();
 
 for (let i = 0; i < 1200 && !game.plant.resolved; i++) {
@@ -60,6 +62,14 @@ assert.ok(Number(localStorage.getItem('garlic-best')) > 0, 'best score should pe
 
 game.nextPlant();
 const livesBefore = game.lives;
+
+const desiredAngle = game.plant.targetAngle(game.time);
+game.input.held = true;
+game.input.power = game.plant.targetForce(game.time);
+game.input.angle = Math.min(1, desiredAngle + 0.4);
+game.update(1 / 60);
+assert.ok(game.plant.feedback.includes('왼쪽'), 'correction cue should point back from an overshot angle');
+
 for (let i = 0; i < 360 && !game.plant.resolved; i++) {
   game.input.held = true;
   game.input.power = 1;
@@ -71,4 +81,9 @@ assert.ok(game.plant.failReason, 'reckless input should explain its failure');
 assert.equal(game.lives, livesBefore - 1, 'failure should consume one chance');
 assert.equal(game.combo, 0, 'failure should reset combo');
 
-console.log('Smoke test passed: success, failure, scoring, combo, and record storage.');
+game.gameOver();
+const ranking = JSON.parse(localStorage.getItem('garlic-rankings'));
+assert.equal(ranking[0].name, '테스트농부', 'ranking should use the active nickname');
+assert.ok(ranking[0].score > 0, 'ranking should save a completed score');
+
+console.log('Smoke test passed: login, success, failure, scoring, ranking, and record storage.');
