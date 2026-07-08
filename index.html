@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#dff3be" />
+  <title>마늘쫑 뽑기</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="game-shell" aria-label="마늘쫑 뽑기 게임">
+    <canvas id="game" width="960" height="640" aria-label="게임 화면"></canvas>
+
+    <header class="hud" aria-live="polite">
+      <div class="brand"><span>🌱</span> 마늘쫑 뽑기</div>
+      <div class="run-info">
+        <span id="stage-label">밭 1</span>
+        <span id="plant-label">1 / 4</span>
+        <span id="lives" aria-label="남은 기회">● ● ●</span>
+      </div>
+      <div class="score-wrap">
+        <span class="score-caption">점수</span>
+        <strong id="score">0</strong>
+        <span id="combo" class="combo">x1</span>
+      </div>
+    </header>
+
+    <section id="meter-panel" class="meter-panel" aria-label="당기기 상태">
+      <div class="meter-labels"><span>힘 조절</span><strong id="action-hint">마늘쫑을 잡아주세요</strong></div>
+      <div class="power-track">
+        <div id="safe-band" class="safe-band"></div>
+        <div id="danger-line" class="danger-line"></div>
+        <div id="power-fill" class="power-fill"></div>
+        <div id="power-needle" class="power-needle"></div>
+      </div>
+      <div class="sub-meters">
+        <div><span>속대 빠짐</span><i><b id="progress-fill"></b></i></div>
+        <div><span>끊김 위험</span><i class="stress"><b id="stress-fill"></b></i></div>
+      </div>
+    </section>
+
+    <section id="overlay" class="overlay visible">
+      <div id="start-card" class="card start-card">
+        <p class="eyebrow">손끝 농사 아케이드</p>
+        <h1>힘주어, 조심히.<br><em>쑤욱!</em></h1>
+        <p>땅에 남는 마늘 잎대의 중심에서 마늘쫑만 쏙 뽑아냅니다. 위로 당겨 힘을 주고, 기우는 방향에 맞춰 좌우로 움직이세요.</p>
+        <button id="start-button" class="primary">첫 마늘쫑 잡기</button>
+        <div class="best-row">최고 기록 <strong id="best-score">0</strong></div>
+      </div>
+
+      <div id="result-card" class="card result-card hidden">
+        <p id="result-eyebrow" class="eyebrow">오늘 농사 끝!</p>
+        <h2 id="result-title">수확 완료</h2>
+        <div id="final-score" class="final-score">0</div>
+        <p id="result-copy"></p>
+        <button id="retry-button" class="primary">다시 뽑기</button>
+      </div>
+    </section>
+
+    <div id="tutorial" class="tutorial hidden" aria-live="assertive">
+      <span id="tutorial-step">1 / 3</span>
+      <strong id="tutorial-title">꾹 잡고 위로</strong>
+      <p id="tutorial-copy">마늘쫑을 누른 채 천천히 위로 끌어올리세요.</p>
+      <button id="skip-tutorial">알겠어요</button>
+    </div>
+
+    <div id="toast" class="toast" aria-live="assertive"></div>
+    <div id="score-pop" class="score-pop"></div>
+    <button id="sound-button" class="sound-button" aria-label="소리 켜기 또는 끄기">♪</button>
+  </main>
+
+  <script src="game.js" defer></script>
+</body>
+</html>
