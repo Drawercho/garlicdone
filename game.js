@@ -9,6 +9,8 @@
   const MAX_LIVES = 5;
   const PLANTS_PER_STAGE = 4;
   const MAX_STAGE = 12;
+  const RELEASE_HARVEST_MIN = .68;
+  const AUTO_HARVEST_PROGRESS = 1;
   const formatCm = (value) => `${Number(value || 0).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}cm`;
   const scoreValue = (row) => Number(row?.cm ?? row?.score ?? 0);
 
@@ -119,6 +121,13 @@
     dancer: { name: '춤추는 마늘쫑', color: '#69b94b', dark: '#34743b', width: .92, cmBonus: 1.08, pattern: 'zigzag' },
     golden: { name: '황금 마늘쫑', color: '#e4ae32', dark: '#a87323', width: 1.08, cmBonus: 1.35, pattern: 'pulse' }
   };
+
+  const STAGE_THEMES = [
+    { skyTop: '#9bd7ec', skyBottom: '#e7f3b9', sun: '#fffad8', cloud: 'rgba(255,255,255,.72)', hillA: '#8fbe63', hillB: '#72a755', soilA: '#a86d3c', soilB: '#87522f', soilC: '#563722', ridge: '#c88b4b', crop: '#447e3d', sign: '#7a532f', prop: 'sprouts', label: '새벽 밭' },
+    { skyTop: '#81c9f1', skyBottom: '#ffe0a8', sun: '#fff0b6', cloud: 'rgba(255,248,225,.76)', hillA: '#a4ca63', hillB: '#7fad53', soilA: '#ba7840', soilB: '#945d34', soilC: '#603c25', ridge: '#d79a53', crop: '#3f8542', sign: '#8a5d34', prop: 'flowers', label: '햇살 밭' },
+    { skyTop: '#f1a36f', skyBottom: '#f6dda0', sun: '#ffd78a', cloud: 'rgba(255,235,200,.68)', hillA: '#b8b95d', hillB: '#8e9a4a', soilA: '#9b6540', soilB: '#754b31', soilC: '#4c3325', ridge: '#c9874f', crop: '#586f35', sign: '#76482d', prop: 'crates', label: '노을 밭' },
+    { skyTop: '#6f9fd0', skyBottom: '#cfd99c', sun: '#f5f7d1', cloud: 'rgba(240,248,255,.56)', hillA: '#74895a', hillB: '#596f4c', soilA: '#7a5638', soilB: '#5b3f2d', soilC: '#36281f', ridge: '#a56e42', crop: '#315b37', sign: '#5e3d28', prop: 'flags', label: '고수 밭' }
+  ];
 
   class Plant {
     constructor(stage, index, rng) {
@@ -493,7 +502,9 @@
       const quality = forceQ * (.35 + .65 * angleQ);
       p.releaseQuality = quality;
 
-      if (p.progress < .68) {
+      if (p.progress >= AUTO_HARVEST_PROGRESS) {
+        this.succeed();
+      } else if (p.progress < RELEASE_HARVEST_MIN) {
         this.fail(`아직 ${formatCm(p.progress * p.lengthCm)}밖에 안 빠졌어요 · 조금 더 풀어낸 뒤 놓으세요`);
       } else if (power > p.danger + .035 || p.stress > .92) {
         this.fail('놓는 순간 힘이 너무 세서 마늘쫑이 끊어졌어요');
@@ -510,7 +521,7 @@
       const data = [
         ['꾹 잡고 위로', '마늘쫑을 누른 채 천천히 위로 끌어 힘을 주세요.'],
         ['지금 필요한 쪽으로', '안내는 현재 위치에서 더 움직일 방향입니다. 체크가 뜨면 그대로 유지하세요.'],
-        ['준비되면 손 놓기', '마늘쫑이 거의 빠져나오면 힘과 각도를 맞춘 채 손을 놓아 수확하세요.']
+        ['끝까지면 자동 수확', '마늘쫑이 다 올라오면 바로 쑤욱 뽑힙니다. 덜 뽑힌 상태에서는 손을 놓아 조심히 수확할 수 있어요.']
       ][step];
       $('tutorial-step').textContent = `${step + 1} / 3`;
       $('tutorial-title').textContent = data[0]; $('tutorial-copy').textContent = data[1];
@@ -582,7 +593,7 @@
       if (inZone) {
         const gain = (.085 + .115 * quality) * (1 + Math.min(this.stage, 10) * .012);
         const previousStep = Math.floor(p.progress * 8);
-        p.progress = clamp(p.progress + gain * dt, 0, .965);
+        p.progress = clamp(p.progress + gain * dt, 0, AUTO_HARVEST_PROGRESS);
         const currentStep = Math.floor(p.progress * 8);
         if (currentStep > previousStep && currentStep < 8) {
           p.slipPulse = 1; this.shake = Math.max(this.shake, 1.7);
@@ -590,8 +601,8 @@
         }
         p.accuracySum += quality * dt; p.accuracyTime += dt;
         const angleError = desired - this.input.angle;
-        p.releaseReady = p.progress > .82 && quality > .48;
-        p.feedback = p.releaseReady ? '지금 손 놓으면 쑤욱!' : quality > .78 ? '맞았어요 · 그대로 유지!' : angleQ < .62 ? (angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →') : '힘을 미세하게 맞춰요';
+        p.releaseReady = p.progress >= RELEASE_HARVEST_MIN && p.progress < AUTO_HARVEST_PROGRESS && quality > .48;
+        p.feedback = p.progress > .96 ? '끝까지 올라왔어요 · 쑤욱!' : p.releaseReady ? '덜 뽑혔지만 지금 놓아도 돼요' : quality > .78 ? '맞았어요 · 그대로 유지!' : angleQ < .62 ? (angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →') : '힘을 미세하게 맞춰요';
         this.sound.tension(quality);
         if (!p.lastZone && quality > .55) this.burst(this.w / 2, this.h * .665, 'soil', 5);
       } else if (this.input.held && power > .08) {
@@ -628,6 +639,7 @@
       p.lastZone = inZone;
 
       if (p.stress >= 1) this.fail(power > p.danger ? '너무 세게 당겨 마늘쫑이 끊어졌어요' : '반대 각도로 비틀어 잎대 안에서 걸렸어요');
+      else if (p.progress >= AUTO_HARVEST_PROGRESS) { p.releaseQuality = quality; this.succeed(); }
       this.updateUI(target);
     }
     succeed() {
@@ -710,37 +722,91 @@
       $('power-fill').style.width = `${power * 100}%`; $('power-needle').style.left = `${power * 100}%`;
       $('progress-fill').style.width = `${p.progress * 100}%`; $('stress-fill').style.width = `${p.stress * 100}%`;
     }
+    stageTheme() {
+      const index = Math.min(STAGE_THEMES.length - 1, Math.floor((this.stage - 1) / 3));
+      return STAGE_THEMES[index];
+    }
     drawBackground(ctx) {
       const w = this.w, h = this.h, ground = h * .66;
+      const theme = this.stageTheme();
       const sky = ctx.createLinearGradient(0, 0, 0, ground);
-      sky.addColorStop(0, '#9bd7ec'); sky.addColorStop(1, '#e7f3b9');
+      sky.addColorStop(0, theme.skyTop); sky.addColorStop(1, theme.skyBottom);
       ctx.fillStyle = sky; ctx.fillRect(0, 0, w, ground);
-      ctx.fillStyle = 'rgba(255,250,216,.8)';
+      ctx.fillStyle = theme.sun;
       const sunX = w * .82, sunY = h * .15;
       ctx.beginPath(); ctx.arc(sunX, sunY, Math.min(47, w * .06), 0, Math.PI * 2); ctx.fill();
-      this.cloud(ctx, w * .18 + Math.sin(this.time * .07) * 20, h * .18, Math.min(1, w / 700));
-      this.cloud(ctx, w * .64 + Math.sin(this.time * .05 + 2) * 14, h * .28, .65);
-      ctx.fillStyle = '#8fbe63';
+      if (this.stage >= 10) {
+        ctx.save(); ctx.globalAlpha = .3; ctx.strokeStyle = '#fffbe0'; ctx.lineWidth = 2;
+        for (let i = 0; i < 9; i++) {
+          const sx = (i * 97 + 33) % w, sy = h * (.12 + (i % 4) * .07);
+          ctx.beginPath(); ctx.arc(sx, sy, 1.5 + (i % 3), 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      this.cloud(ctx, w * .18 + Math.sin(this.time * .07) * 20, h * .18, Math.min(1, w / 700), theme.cloud);
+      this.cloud(ctx, w * .64 + Math.sin(this.time * .05 + 2) * 14, h * .28, .65, theme.cloud);
+      ctx.fillStyle = theme.hillA;
       ctx.beginPath(); ctx.moveTo(0, ground); ctx.quadraticCurveTo(w * .2, ground - 115, w * .44, ground); ctx.quadraticCurveTo(w * .72, ground - 145, w, ground - 15); ctx.lineTo(w, ground); ctx.fill();
-      ctx.fillStyle = '#72a755';
+      ctx.fillStyle = theme.hillB;
       ctx.beginPath(); ctx.moveTo(0, ground); ctx.quadraticCurveTo(w * .3, ground - 68, w * .55, ground); ctx.quadraticCurveTo(w * .78, ground - 90, w, ground - 35); ctx.lineTo(w, ground); ctx.fill();
+      this.drawStageProps(ctx, theme, ground);
       // Distant crops
       for (let i = 0; i < 11; i++) {
         const x = (i + .35) / 11 * w, y = ground - 12 - (i % 2) * 7;
-        ctx.strokeStyle = '#447e3d'; ctx.lineWidth = 3;
+        ctx.strokeStyle = theme.crop; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.moveTo(x, ground + 2); ctx.quadraticCurveTo(x - 5, y, x - 11, y - 11); ctx.moveTo(x, ground + 2); ctx.quadraticCurveTo(x + 4, y, x + 10, y - 15); ctx.stroke();
       }
       const soil = ctx.createLinearGradient(0, ground, 0, h);
-      soil.addColorStop(0, '#a86d3c'); soil.addColorStop(.2, '#87522f'); soil.addColorStop(1, '#563722');
+      soil.addColorStop(0, theme.soilA); soil.addColorStop(.2, theme.soilB); soil.addColorStop(1, theme.soilC);
       ctx.fillStyle = soil; ctx.fillRect(0, ground, w, h - ground);
-      ctx.fillStyle = '#c88b4b';
+      ctx.fillStyle = theme.ridge;
       ctx.beginPath(); ctx.moveTo(0, ground); for (let x = 0; x <= w; x += 25) ctx.lineTo(x, ground + Math.sin(x * .08) * 4); ctx.lineTo(w, ground + 18); ctx.lineTo(0, ground + 18); ctx.fill();
-      ctx.globalAlpha = .18; ctx.strokeStyle = '#edbe73'; ctx.lineWidth = 2;
+      ctx.globalAlpha = .2; ctx.strokeStyle = theme.ridge; ctx.lineWidth = 2;
       for (let y = ground + 55; y < h; y += 47) { ctx.beginPath(); ctx.moveTo(0, y); ctx.bezierCurveTo(w * .3, y - 18, w * .65, y + 18, w, y - 3); ctx.stroke(); }
       ctx.globalAlpha = 1;
     }
-    cloud(ctx, x, y, s) {
-      ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.fillStyle = 'rgba(255,255,255,.72)';
+    drawStageProps(ctx, theme, ground) {
+      const w = this.w, h = this.h;
+      ctx.save();
+      ctx.fillStyle = theme.sign; ctx.strokeStyle = 'rgba(56,38,23,.45)'; ctx.lineWidth = 2;
+      const signX = w * .12, signY = ground - 62;
+      ctx.beginPath(); ctx.roundRect(signX - 34, signY - 18, 68, 35, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff0bd'; ctx.textAlign = 'center'; ctx.font = '900 12px sans-serif'; ctx.fillText(theme.label, signX, signY - 1);
+      ctx.strokeStyle = theme.sign; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(signX, signY + 16); ctx.lineTo(signX, ground + 8); ctx.stroke();
+
+      if (theme.prop === 'flowers') {
+        for (let i = 0; i < 7; i++) {
+          const x = w * (.68 + i * .035), y = ground - 5 - (i % 2) * 7;
+          ctx.strokeStyle = '#4f7e3f'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, ground + 3); ctx.lineTo(x, y - 12); ctx.stroke();
+          ctx.fillStyle = ['#ffd95a', '#f28b6a', '#f6f0a0'][i % 3];
+          ctx.beginPath(); ctx.arc(x, y - 17, 6, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (theme.prop === 'crates') {
+        for (let i = 0; i < 3; i++) {
+          const x = w * .73 + i * 33, y = ground - 31 + (i % 2) * 9;
+          ctx.fillStyle = '#9b6137'; ctx.strokeStyle = '#604026'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.roundRect(x, y, 42, 29, 5); ctx.fill(); ctx.stroke();
+          ctx.strokeStyle = '#d69b5c'; ctx.beginPath(); ctx.moveTo(x + 7, y + 14); ctx.lineTo(x + 35, y + 14); ctx.stroke();
+        }
+      } else if (theme.prop === 'flags') {
+        for (let i = 0; i < 5; i++) {
+          const x = w * (.62 + i * .055), y = ground - 72 - (i % 2) * 16;
+          ctx.strokeStyle = '#4e3b2b'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, ground); ctx.lineTo(x, y); ctx.stroke();
+          ctx.fillStyle = ['#f3d35c', '#e77b5f', '#75b86c'][i % 3];
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 26, y + 8); ctx.lineTo(x, y + 16); ctx.closePath(); ctx.fill();
+        }
+      } else {
+        for (let i = 0; i < 6; i++) {
+          const x = w * (.68 + i * .043), y = ground - 4;
+          ctx.strokeStyle = '#4b823f'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(x, y + 6); ctx.quadraticCurveTo(x - 7, y - 13, x - 16, y - 20); ctx.moveTo(x, y + 6); ctx.quadraticCurveTo(x + 6, y - 15, x + 14, y - 24); ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+    cloud(ctx, x, y, s, color = 'rgba(255,255,255,.72)') {
+      ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.fillStyle = color;
       ctx.beginPath(); ctx.arc(-30, 5, 20, 0, Math.PI * 2); ctx.arc(0, -5, 30, 0, Math.PI * 2); ctx.arc(30, 7, 20, 0, Math.PI * 2); ctx.fill(); ctx.restore();
     }
     drawPlant(ctx) {
@@ -799,7 +865,7 @@
       const curlSide = Math.sin(p.seed) > 0 ? 1 : -1;
       const budX = stemTopX + curlSide * 43;
       const budY = topY + 23;
-      const stalkW = 11.5 * p.type.width;
+      const stalkW = 13 * p.type.width;
       const traceScape = () => {
         ctx.moveTo(x + bend * .06, visibleBottom);
         ctx.bezierCurveTo(x + bend * .16, lerp(visibleBottom, neckY, .38), x + bend * .76, neckY + 78, stemTopX, neckY);
@@ -808,17 +874,19 @@
       ctx.save();
       ctx.translate(x + flyX, sheathTop - fly); ctx.rotate(rotation); ctx.translate(-x, -sheathTop);
       ctx.lineCap = 'round';
-      ctx.strokeStyle = p.type.dark; ctx.lineWidth = stalkW + 4.5;
+      ctx.shadowColor = 'rgba(16,48,24,.24)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
+      ctx.strokeStyle = p.type.dark; ctx.lineWidth = stalkW + 7;
       ctx.beginPath(); traceScape(); ctx.stroke();
+      ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
       const scapeGradient = ctx.createLinearGradient(0, innerBottom, 0, topY - 8);
       if (p.key === 'golden') {
         scapeGradient.addColorStop(0, '#fff2ae'); scapeGradient.addColorStop(.2, '#f3d768'); scapeGradient.addColorStop(.58, '#d8a431'); scapeGradient.addColorStop(1, '#9b6b20');
       } else {
-        scapeGradient.addColorStop(0, '#f0f6c9'); scapeGradient.addColorStop(.12, '#d8eca2'); scapeGradient.addColorStop(.3, '#91c66c'); scapeGradient.addColorStop(.58, p.type.color); scapeGradient.addColorStop(1, p.type.dark);
+        scapeGradient.addColorStop(0, '#eef6bc'); scapeGradient.addColorStop(.12, '#cde891'); scapeGradient.addColorStop(.3, '#79b95d'); scapeGradient.addColorStop(.58, p.type.color); scapeGradient.addColorStop(1, p.type.dark);
       }
       ctx.strokeStyle = scapeGradient; ctx.lineWidth = stalkW;
       ctx.beginPath(); traceScape(); ctx.stroke();
-      ctx.strokeStyle = 'rgba(245,255,211,.46)'; ctx.lineWidth = 2.2;
+      ctx.strokeStyle = 'rgba(255,255,224,.74)'; ctx.lineWidth = 1.55;
       ctx.beginPath(); traceScape(); ctx.stroke();
 
       // The soft, pale base and fine sheath marks appear only after it clears the plant.
@@ -895,7 +963,52 @@
       ctx.strokeStyle = 'rgba(222,239,174,.32)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(0, -3); ctx.quadraticCurveTo(dx * .42, dy * .5, dx, dy); ctx.stroke(); ctx.restore();
     }
+    drawHarvestPile(ctx) {
+      if (!this.harvested) return;
+      const w = this.w, h = this.h, ground = h * .66;
+      const count = Math.min(this.harvested, 28);
+      const x = w < 560 ? w * .18 : w * .2;
+      const y = ground + Math.min(86, h * .14);
+      ctx.save();
+      ctx.fillStyle = 'rgba(37,28,18,.24)';
+      ctx.beginPath(); ctx.ellipse(x + 8, y + 20, 82, 18, 0, 0, Math.PI * 2); ctx.fill();
+
+      if (this.stage >= 4) {
+        ctx.fillStyle = '#9b6137'; ctx.strokeStyle = '#5c3d25'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(x - 59, y + 6, 118, 29, 8); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = '#d69b5c'; ctx.lineWidth = 2;
+        for (let i = -42; i <= 42; i += 28) { ctx.beginPath(); ctx.moveTo(x + i, y + 8); ctx.lineTo(x + i + 9, y + 33); ctx.stroke(); }
+      }
+
+      for (let i = 0; i < count; i++) {
+        const row = Math.floor(i / 7);
+        const col = i % 7;
+        const ox = (col - 3) * 13 + ((row % 2) * 6);
+        const oy = -row * 7 + Math.sin(i * 1.7) * 2;
+        const rot = (-.45 + col * .15) + Math.sin(i * 2.1) * .08;
+        const length = 58 + (i % 4) * 7;
+        ctx.save(); ctx.translate(x + ox, y + oy); ctx.rotate(rot);
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#1f5b36'; ctx.lineWidth = 7;
+        ctx.beginPath(); ctx.moveTo(-length * .42, 0); ctx.quadraticCurveTo(-5, -14 - (i % 3) * 3, length * .38, -3); ctx.stroke();
+        const g = ctx.createLinearGradient(-length * .42, 0, length * .38, -3);
+        g.addColorStop(0, '#eff5c8'); g.addColorStop(.25, '#a9d57a'); g.addColorStop(1, '#3e9b4b');
+        ctx.strokeStyle = g; ctx.lineWidth = 4.8;
+        ctx.beginPath(); ctx.moveTo(-length * .42, 0); ctx.quadraticCurveTo(-5, -14 - (i % 3) * 3, length * .38, -3); ctx.stroke();
+        ctx.fillStyle = '#5f9847'; ctx.strokeStyle = '#1f5b36'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(length * .44, -4, 5.8, 11, .7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.fillStyle = 'rgba(255,249,215,.92)';
+      ctx.strokeStyle = '#6d7040'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(x - 43, y - 51 - Math.min(18, count), 86, 28, 12); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#42533b'; ctx.textAlign = 'center'; ctx.font = '900 12px sans-serif';
+      ctx.fillText(`수확 ${this.harvested}줄`, x, y - 33 - Math.min(18, count));
+      ctx.restore();
+    }
     drawForeground(ctx) {
+      if (this.state === 'playing' || this.state === 'gameover') this.drawHarvestPile(ctx);
       if (this.stageBanner > 0 && this.state === 'playing') {
         const a = Math.min(1, this.stageBanner * 2, (1.8 - this.stageBanner) * 3);
         ctx.save(); ctx.globalAlpha = clamp(a); ctx.textAlign = 'center';

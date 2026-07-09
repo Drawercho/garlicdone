@@ -62,6 +62,17 @@ assert.ok(game.combo > 0, 'success should build combo');
 assert.ok(Number(localStorage.getItem('garlic-best')) > 0, 'best score should persist');
 
 game.nextPlant();
+for (let i = 0; i < 1400 && !game.plant.resolved; i++) {
+  game.input.held = true;
+  game.input.power = game.plant.targetForce(game.time);
+  game.input.angle = game.plant.targetAngle(game.time);
+  game.update(1 / 60);
+}
+
+assert.equal(game.plant.resolved, true, 'full pull should auto-harvest without release');
+assert.equal(game.plant.failReason, '', 'auto-harvest should not fail with skillful input');
+
+game.nextPlant();
 const livesBefore = game.lives;
 
 const desiredAngle = game.plant.targetAngle(game.time);
