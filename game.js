@@ -8,9 +8,10 @@
   const START_LIVES = 5;
   const MAX_LIVES = 5;
   const PLANTS_PER_STAGE = 4;
-  const MAX_STAGE = 12;
+  const MAX_STAGE = 5;
   const RELEASE_HARVEST_MIN = .68;
   const AUTO_HARVEST_PROGRESS = 1;
+  const FIELD_CLEAR_DURATION = 2.2;
   const formatCm = (value) => `${Number(value || 0).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}cm`;
   const scoreValue = (row) => Number(row?.cm ?? row?.score ?? 0);
 
@@ -125,8 +126,9 @@
   const STAGE_THEMES = [
     { skyTop: '#9bd7ec', skyBottom: '#e7f3b9', sun: '#fffad8', cloud: 'rgba(255,255,255,.72)', hillA: '#8fbe63', hillB: '#72a755', soilA: '#a86d3c', soilB: '#87522f', soilC: '#563722', ridge: '#c88b4b', crop: '#447e3d', sign: '#7a532f', prop: 'sprouts', label: '새벽 밭' },
     { skyTop: '#81c9f1', skyBottom: '#ffe0a8', sun: '#fff0b6', cloud: 'rgba(255,248,225,.76)', hillA: '#a4ca63', hillB: '#7fad53', soilA: '#ba7840', soilB: '#945d34', soilC: '#603c25', ridge: '#d79a53', crop: '#3f8542', sign: '#8a5d34', prop: 'flowers', label: '햇살 밭' },
-    { skyTop: '#f1a36f', skyBottom: '#f6dda0', sun: '#ffd78a', cloud: 'rgba(255,235,200,.68)', hillA: '#b8b95d', hillB: '#8e9a4a', soilA: '#9b6540', soilB: '#754b31', soilC: '#4c3325', ridge: '#c9874f', crop: '#586f35', sign: '#76482d', prop: 'crates', label: '노을 밭' },
-    { skyTop: '#6f9fd0', skyBottom: '#cfd99c', sun: '#f5f7d1', cloud: 'rgba(240,248,255,.56)', hillA: '#74895a', hillB: '#596f4c', soilA: '#7a5638', soilB: '#5b3f2d', soilC: '#36281f', ridge: '#a56e42', crop: '#315b37', sign: '#5e3d28', prop: 'flags', label: '고수 밭' }
+    { skyTop: '#c09de6', skyBottom: '#ffe0ae', sun: '#ffd78a', cloud: 'rgba(255,235,200,.68)', hillA: '#b8b95d', hillB: '#8e9a4a', soilA: '#9b6540', soilB: '#754b31', soilC: '#4c3325', ridge: '#c9874f', crop: '#586f35', sign: '#76482d', prop: 'crates', label: '노을 밭' },
+    { skyTop: '#6f9fd0', skyBottom: '#cfd99c', sun: '#f5f7d1', cloud: 'rgba(240,248,255,.56)', hillA: '#74895a', hillB: '#596f4c', soilA: '#7a5638', soilB: '#5b3f2d', soilC: '#36281f', ridge: '#a56e42', crop: '#315b37', sign: '#5e3d28', prop: 'flags', label: '고수 밭' },
+    { skyTop: '#344c84', skyBottom: '#b8d49a', sun: '#f9f2b5', cloud: 'rgba(245,249,255,.46)', hillA: '#61764e', hillB: '#435d3e', soilA: '#6e4a35', soilB: '#4e362a', soilC: '#2b211b', ridge: '#9a643d', crop: '#b4ca67', sign: '#523623', prop: 'festival', label: '만렙 밭' }
   ];
 
   class Plant {
@@ -136,7 +138,7 @@
       this.key = golden ? 'golden' : rng.pick(pool);
       this.type = TYPES[this.key];
       this.seed = rng.range(0, 100);
-      this.difficulty = clamp((stage - 1) / (MAX_STAGE + 2), 0, .82);
+      this.difficulty = clamp((stage - 1) / Math.max(1, MAX_STAGE - 1), 0, .82);
       this.baseForce = rng.range(.39, .53) + this.difficulty * .08;
       this.band = Math.max(.105, rng.range(.155, .205) - this.difficulty * .07);
       this.danger = clamp(this.baseForce + this.band + rng.range(.14, .2), .72, .9);
@@ -287,6 +289,8 @@
       this.warningCooldown = 0;
       this.transitionTimer = 0;
       this.stageBanner = 0;
+      this.fieldClearTimer = 0;
+      this.fieldClearStage = 0;
       this.tutorialStep = -1;
       this.tutorialDone = localStorage.getItem('garlic-tutorial') === '1';
       this.input = { held: false, power: 0, angle: 0, pointerId: null, x: 0, y: 0, grabX: 0, grabY: 0, grabAngle: 0, keyboard: false };
@@ -448,7 +452,7 @@
       this.sound.init();
       this.rng = new RNG(Date.now());
       this.state = 'playing'; this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES; this.runSaved = false; this.completed = false;
-      this.time = 0; this.particles.length = 0; this.transitionTimer = 0; this.stageBanner = 1.5;
+      this.time = 0; this.particles.length = 0; this.transitionTimer = 0; this.stageBanner = 1.5; this.fieldClearTimer = 0; this.fieldClearStage = 0;
       this.input.power = 0; this.input.angle = 0; this.input.held = false;
       this.plant = new Plant(this.stage, this.plantNo - 1, this.rng);
       $('overlay').classList.remove('visible');
@@ -537,6 +541,7 @@
       if (this.tutorialStep === 2 && this.plant.progress > .72) this.finishTutorial();
     }
     nextPlant() {
+      const clearedStage = this.stage;
       this.plantNo++;
       if (this.plantNo > PLANTS_PER_STAGE) {
         if (this.stage >= MAX_STAGE) {
@@ -544,8 +549,11 @@
           this.gameOver();
           return;
         }
-        this.stage++; this.plantNo = 1; this.stageBanner = 1.8; this.lives = Math.min(MAX_LIVES, this.lives + 1);
-        this.sound.stage(); this.toast(`밭 ${this.stage} · 기회 +1`, 'good');
+        this.stage++; this.plantNo = 1; this.stageBanner = 1.8; this.fieldClearTimer = FIELD_CLEAR_DURATION; this.fieldClearStage = clearedStage; this.lives = Math.min(MAX_LIVES, this.lives + 1);
+        this.sound.stage(); this.toast(`밭 ${clearedStage} 클리어 · 다음 밭!`, 'good');
+        this.burst(this.w / 2, this.h * .42, 'perfect', 24);
+        this.burst(this.w * .28, this.h * .64, 'success', 12);
+        this.burst(this.w * .72, this.h * .64, 'success', 12);
       }
       this.plant = new Plant(this.stage, this.plantNo - 1, this.rng);
       this.input.power = 0; this.input.angle *= .25; this.input.held = false;
@@ -558,6 +566,7 @@
       this.flash = Math.max(0, this.flash - dt * 2.4);
       this.shake = Math.max(0, this.shake - dt * 24);
       this.stageBanner = Math.max(0, this.stageBanner - dt);
+      this.fieldClearTimer = Math.max(0, this.fieldClearTimer - dt);
       if (this.state !== 'playing') return;
       this.updateTutorial();
       if (this.input.keyboard) {
@@ -723,7 +732,7 @@
       $('progress-fill').style.width = `${p.progress * 100}%`; $('stress-fill').style.width = `${p.stress * 100}%`;
     }
     stageTheme() {
-      const index = Math.min(STAGE_THEMES.length - 1, Math.floor((this.stage - 1) / 3));
+      const index = Math.min(STAGE_THEMES.length - 1, Math.max(0, this.stage - 1));
       return STAGE_THEMES[index];
     }
     drawBackground(ctx) {
@@ -735,7 +744,7 @@
       ctx.fillStyle = theme.sun;
       const sunX = w * .82, sunY = h * .15;
       ctx.beginPath(); ctx.arc(sunX, sunY, Math.min(47, w * .06), 0, Math.PI * 2); ctx.fill();
-      if (this.stage >= 10) {
+      if (this.stage >= MAX_STAGE) {
         ctx.save(); ctx.globalAlpha = .3; ctx.strokeStyle = '#fffbe0'; ctx.lineWidth = 2;
         for (let i = 0; i < 9; i++) {
           const sx = (i * 97 + 33) % w, sy = h * (.12 + (i % 4) * .07);
@@ -796,6 +805,21 @@
           ctx.fillStyle = ['#f3d35c', '#e77b5f', '#75b86c'][i % 3];
           ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 26, y + 8); ctx.lineTo(x, y + 16); ctx.closePath(); ctx.fill();
         }
+      } else if (theme.prop === 'festival') {
+        ctx.strokeStyle = 'rgba(255,236,150,.65)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(w * .58, ground - 100); ctx.quadraticCurveTo(w * .74, ground - 139, w * .92, ground - 96); ctx.stroke();
+        for (let i = 0; i < 6; i++) {
+          const x = w * (.59 + i * .062), y = ground - 93 - Math.sin(i * .9) * 19;
+          ctx.strokeStyle = '#4c3929'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y - 13); ctx.lineTo(x, y - 2); ctx.stroke();
+          ctx.fillStyle = ['#ffe36d', '#f28b6a', '#b9e46d'][i % 3]; ctx.strokeStyle = '#6b4b2f';
+          ctx.beginPath(); ctx.ellipse(x, y + 6, 8, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+        for (let i = 0; i < 7; i++) {
+          const x = w * (.66 + i * .037), y = ground - 5 - (i % 2) * 5;
+          ctx.fillStyle = '#c9d46b'; ctx.beginPath(); ctx.arc(x, y - 18, 3, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = '#b4ca67'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, y + 4); ctx.quadraticCurveTo(x + 8, y - 10, x + 16, y - 17); ctx.stroke();
+        }
       } else {
         for (let i = 0; i < 6; i++) {
           const x = w * (.68 + i * .043), y = ground - 4;
@@ -808,6 +832,96 @@
     cloud(ctx, x, y, s, color = 'rgba(255,255,255,.72)') {
       ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.fillStyle = color;
       ctx.beginPath(); ctx.arc(-30, 5, 20, 0, Math.PI * 2); ctx.arc(0, -5, 30, 0, Math.PI * 2); ctx.arc(30, 7, 20, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+    drawWaitingScapes(ctx) {
+      if (this.state !== 'playing' && this.state !== 'gameover') return;
+      const w = this.w, h = this.h, ground = h * .66;
+      ctx.save();
+      ctx.globalAlpha = .34;
+      ctx.strokeStyle = '#fff2b9'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(Math.max(44, w * .08), ground + 20); ctx.quadraticCurveTo(w / 2, ground + 41, Math.min(w - 44, w * .92), ground + 20); ctx.stroke();
+      ctx.globalAlpha = 1;
+      const queue = [];
+      for (let n = 1; n <= PLANTS_PER_STAGE; n++) {
+        if (n === this.plantNo) continue;
+        const relative = n - this.plantNo;
+        const direction = Math.sign(relative);
+        const rank = Math.abs(relative);
+        const baseDistance = Math.min(w * .19, 150);
+        const stepDistance = Math.min(w * .12, 86);
+        const distance = baseDistance + (rank - 1) * stepDistance;
+        const scaleBase = rank === 1 ? .78 : rank === 2 ? .65 : .55;
+        queue.push({
+          n,
+          rank,
+          x: clamp(w / 2 + direction * distance, 46, w - 46),
+          scale: scaleBase * (w < 520 ? .88 : 1),
+          status: n < this.plantNo ? 'done' : 'waiting'
+        });
+      }
+      queue.sort((a, b) => b.rank - a.rank).forEach((slot) => this.drawWaitingScape(ctx, slot.x, ground, slot.scale, slot.n, slot.status));
+      ctx.restore();
+    }
+    drawWaitingScape(ctx, x, ground, scale, number, status) {
+      const done = status === 'done';
+      const bob = Math.sin(this.time * 1.7 + number * 1.3) * (done ? 1 : 2.4);
+      ctx.save();
+      ctx.translate(x, ground + 7 + bob);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = done ? .64 : .9;
+
+      ctx.fillStyle = 'rgba(33,27,18,.18)';
+      ctx.beginPath(); ctx.ellipse(0, 10, 54, 12, 0, 0, Math.PI * 2); ctx.fill();
+
+      const leafSway = Math.sin(this.time * 1.2 + number) * 3;
+      this.garlicLeaf(ctx, -6, 6, -66 + leafSway, -83, 12, done ? '#698454' : '#558a4c');
+      this.garlicLeaf(ctx, 7, 6, 66 + leafSway, -91, 12, done ? '#78905a' : '#67a158');
+      this.garlicLeaf(ctx, -2, 5, -25 + leafSway, -119, 10, done ? '#6e8754' : '#73aa5e');
+      this.garlicLeaf(ctx, 3, 5, 27 + leafSway, -108, 10, done ? '#7d9360' : '#80b968');
+
+      const sheath = ctx.createLinearGradient(-17, 0, 17, 0);
+      sheath.addColorStop(0, done ? '#5f7446' : '#568948');
+      sheath.addColorStop(.5, done ? '#c7d89a' : '#d5e8a7');
+      sheath.addColorStop(1, done ? '#536d42' : '#3d753e');
+      ctx.fillStyle = sheath; ctx.strokeStyle = done ? '#50643d' : '#386d3c'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-17, 9); ctx.quadraticCurveTo(-13, -26, -8, -69); ctx.quadraticCurveTo(0, -75, 8, -69); ctx.quadraticCurveTo(13, -26, 17, 9); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = done ? '#725642' : '#294f31'; ctx.strokeStyle = '#e8efb4'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(0, -70, 9, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      if (done) {
+        ctx.strokeStyle = '#e9efb6'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-4, -74); ctx.quadraticCurveTo(4, -88, 16, -101); ctx.stroke();
+        ctx.strokeStyle = '#7d5a3e'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(-8, -79); ctx.lineTo(12, -96); ctx.stroke();
+      } else {
+        const side = number % 2 ? -1 : 1;
+        const trace = () => {
+          ctx.moveTo(0, -70);
+          ctx.bezierCurveTo(4 * side, -112, 26 * side, -130, 42 * side, -112);
+          ctx.bezierCurveTo(52 * side, -101, 44 * side, -85, 30 * side, -80);
+        };
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#205c36'; ctx.lineWidth = 9;
+        ctx.beginPath(); trace(); ctx.stroke();
+        const stem = ctx.createLinearGradient(0, -70, 0, -136);
+        stem.addColorStop(0, '#eef6bc'); stem.addColorStop(.35, '#93cb67'); stem.addColorStop(1, '#3f8d43');
+        ctx.strokeStyle = stem; ctx.lineWidth = 6;
+        ctx.beginPath(); trace(); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,226,.72)'; ctx.lineWidth = 1.3;
+        ctx.beginPath(); trace(); ctx.stroke();
+        ctx.save(); ctx.translate(30 * side, -80); ctx.rotate(side * .55);
+        ctx.fillStyle = '#7caf50'; ctx.strokeStyle = '#285f36'; ctx.lineWidth = 1.8;
+        ctx.beginPath(); ctx.moveTo(0, -15); ctx.bezierCurveTo(7, -7, 7, 8, 0, 17); ctx.bezierCurveTo(-7, 8, -7, -7, 0, -15); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = done ? 'rgba(255,241,191,.9)' : 'rgba(255,250,218,.94)';
+      ctx.strokeStyle = done ? '#7a6841' : '#477345'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(-34, 22, 68, 28, 12); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = done ? '#6a5a3e' : '#315e38'; ctx.textAlign = 'center'; ctx.font = '900 11px sans-serif';
+      ctx.fillText(`${number}번 ${done ? '수확' : '대기'}`, 0, 40);
+      ctx.restore();
     }
     drawPlant(ctx) {
       const p = this.plant, w = this.w, h = this.h, ground = h * .66, x = w / 2;
@@ -1007,8 +1121,44 @@
       ctx.fillText(`수확 ${this.harvested}줄`, x, y - 33 - Math.min(18, count));
       ctx.restore();
     }
+    drawFieldClear(ctx) {
+      if (this.fieldClearTimer <= 0 || this.state !== 'playing') return;
+      const t = 1 - this.fieldClearTimer / FIELD_CLEAR_DURATION;
+      const a = Math.min(1, this.fieldClearTimer * 2.4, t * 5.5);
+      const pulse = 1 + Math.sin(this.time * 9) * .025;
+      const cx = this.w / 2, cy = this.h * .31;
+      ctx.save();
+      ctx.globalAlpha = clamp(a);
+      ctx.translate(cx, cy);
+      ctx.scale(pulse, pulse);
+
+      const panelW = Math.min(390, this.w - 34);
+      const panelH = 108;
+      ctx.fillStyle = 'rgba(255,249,218,.95)';
+      ctx.strokeStyle = '#5d7e42'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.roundRect(-panelW / 2, -panelH / 2, panelW, panelH, 25); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(103,158,74,.18)';
+      ctx.beginPath(); ctx.roundRect(-panelW / 2 + 12, 6, panelW - 24, 32, 16); ctx.fill();
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#e17b3c'; ctx.font = `950 ${Math.min(43, this.w * .085)}px sans-serif`;
+      ctx.strokeStyle = '#fff3bd'; ctx.lineWidth = 6;
+      ctx.strokeText(`밭 ${this.fieldClearStage} 클리어!`, 0, -8);
+      ctx.fillText(`밭 ${this.fieldClearStage} 클리어!`, 0, -8);
+      ctx.fillStyle = '#42633b'; ctx.font = '900 14px sans-serif';
+      ctx.fillText(`다음 밭 ${this.stage}/${MAX_STAGE} · 마늘쫑 4줄기 준비`, 0, 29);
+
+      for (let i = 0; i < MAX_STAGE; i++) {
+        const x = (i - (MAX_STAGE - 1) / 2) * 28;
+        ctx.fillStyle = i < this.stage - 1 ? '#6fba5a' : i === this.stage - 1 ? '#f0b34b' : '#d6d0a1';
+        ctx.strokeStyle = '#546540'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x, 51, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+      ctx.restore();
+    }
     drawForeground(ctx) {
       if (this.state === 'playing' || this.state === 'gameover') this.drawHarvestPile(ctx);
+      this.drawFieldClear(ctx);
       if (this.stageBanner > 0 && this.state === 'playing') {
         const a = Math.min(1, this.stageBanner * 2, (1.8 - this.stageBanner) * 3);
         ctx.save(); ctx.globalAlpha = clamp(a); ctx.textAlign = 'center';
@@ -1028,7 +1178,7 @@
       this.particles = this.particles.filter((p) => p.update(rawDt));
       const ctx = this.ctx; ctx.save();
       const sx = this.shake ? (Math.random() - .5) * this.shake : 0, sy = this.shake ? (Math.random() - .5) * this.shake : 0;
-      ctx.translate(sx, sy); this.drawBackground(ctx); this.drawPlant(ctx);
+      ctx.translate(sx, sy); this.drawBackground(ctx); this.drawWaitingScapes(ctx); this.drawPlant(ctx);
       this.particles.forEach((p) => p.draw(ctx)); this.drawForeground(ctx); ctx.restore();
       requestAnimationFrame((t) => this.loop(t));
     }

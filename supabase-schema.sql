@@ -6,10 +6,10 @@ create table if not exists public.garlic_rankings (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(name) between 1 and 10),
   cm numeric(8, 1) not null check (cm >= 0 and cm <= 3000),
-  stage integer not null check (stage between 1 and 12),
-  combo integer not null default 0 check (combo between 0 and 48),
-  harvested integer not null default 0 check (harvested between 0 and 48),
-  perfect_count integer not null default 0 check (perfect_count between 0 and 48),
+  stage integer not null check (stage between 1 and 5),
+  combo integer not null default 0 check (combo between 0 and 20),
+  harvested integer not null default 0 check (harvested between 0 and 20),
+  perfect_count integer not null default 0 check (perfect_count between 0 and 20),
   created_at timestamptz not null default now()
 );
 
@@ -47,10 +47,10 @@ begin
       char_length(name) between 1 and 10
       and cm >= 0
       and cm <= 3000
-      and stage between 1 and 12
-      and combo between 0 and 48
-      and harvested between 0 and 48
-      and perfect_count between 0 and 48
+      and stage between 1 and 5
+      and combo between 0 and 20
+      and harvested between 0 and 20
+      and perfect_count between 0 and 20
     );
   end if;
 end $$;
