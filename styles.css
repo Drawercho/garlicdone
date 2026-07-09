@@ -110,14 +110,25 @@ button { font: inherit; }
 }
 
 .meter-panel.hidden-panel { transform: translate(-50%, 120%); opacity: 0; }
+.meter-panel.lesson-mode {
+  border-color: rgba(91, 160, 71, .42);
+  box-shadow: 0 9px 25px rgba(36,53,31,.2), 0 0 0 5px rgba(255,244,173,.28);
+}
+.meter-panel.warning-mode {
+  border-color: rgba(230, 92, 75, .6);
+  box-shadow: 0 9px 25px rgba(36,53,31,.2), 0 0 0 5px rgba(232, 92, 79, .18);
+}
 .meter-labels { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
 .meter-labels span { font-size: 11px; font-weight: 900; opacity: .68; }
 .meter-labels strong { font-size: 13px; color: var(--dark-leaf); }
 .power-track { position: relative; height: 22px; border-radius: 999px; background: #d8d2ae; overflow: hidden; box-shadow: inset 0 2px 4px rgba(39,53,31,.17); }
 .safe-band { position: absolute; top: 0; bottom: 0; left: 38%; width: 23%; background: repeating-linear-gradient(135deg,#8fd76b 0 8px,#80c95d 8px 16px); box-shadow: inset 0 0 0 2px rgba(255,255,255,.35); transition: left .12s, width .15s; }
+.lesson-mode .safe-band { animation: safe-glow 1s ease-in-out infinite; background: repeating-linear-gradient(135deg,#a6ec71 0 8px,#7fd85e 8px 16px); }
+.warning-mode .power-needle { background: #fff0dc; box-shadow: 0 0 0 2px #9c3f35, 0 0 12px #e85b4f; }
 .danger-line { position: absolute; top: 0; bottom: 0; left: 78%; width: 4px; background: #e45c48; box-shadow: 0 0 8px #e45c48; z-index: 2; transition: left .15s; }
 .power-fill { position: absolute; inset: 0 auto 0 0; width: 0%; background: linear-gradient(90deg,#f1c54f,#ef8b43,#e4554a); opacity: .7; transition: width .06s linear; }
 .power-needle { position: absolute; top: -3px; bottom: -3px; left: 0%; width: 5px; border-radius: 4px; background: white; box-shadow: 0 0 0 2px #34462e, 0 1px 4px #222; transform: translateX(-50%); transition: left .06s linear; }
+@keyframes safe-glow { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.18); } }
 .sub-meters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 9px; }
 .sub-meters div { display: grid; grid-template-columns: auto 1fr; gap: 7px; align-items: center; }
 .sub-meters span { font-size: 10px; font-weight: 800; white-space: nowrap; }

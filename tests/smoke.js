@@ -47,6 +47,16 @@ game.enterFarm('테스트농부');
 assert.equal(JSON.parse(localStorage.getItem('garlic-profile')).name, '테스트농부', 'nickname should persist');
 game.start();
 
+assert.equal(game.plant.lesson, 1, 'first scape should be the forgiving hand-feel lesson');
+game.input.held = true;
+game.input.power = .22;
+game.input.angle = 1;
+game.releaseInput();
+assert.equal(game.plant.resolved, true, 'first scape should forgive rough input and still succeed');
+assert.equal(game.plant.failReason, '', 'first lesson should not punish rough first input');
+
+game.nextPlant();
+assert.equal(game.plant.lesson, 2, 'second scape should teach force control');
 for (let i = 0; i < 1200 && game.plant.progress < .9; i++) {
   game.input.held = true;
   game.input.power = game.plant.targetForce(game.time);
@@ -62,6 +72,7 @@ assert.ok(game.combo > 0, 'success should build combo');
 assert.ok(Number(localStorage.getItem('garlic-best')) > 0, 'best score should persist');
 
 game.nextPlant();
+assert.equal(game.plant.lesson, 3, 'third scape should teach resistance pattern response');
 for (let i = 0; i < 1400 && !game.plant.resolved; i++) {
   game.input.held = true;
   game.input.power = game.plant.targetForce(game.time);

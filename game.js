@@ -12,6 +12,12 @@
   const RELEASE_HARVEST_MIN = .68;
   const AUTO_HARVEST_PROGRESS = 1;
   const FIELD_CLEAR_DURATION = 2.2;
+  const FIRST_PLAY_LESSONS = [
+    null,
+    { title: '첫 줄기는 손맛부터', short: '잡고 위로 쭉!', copy: '손 아이콘처럼 위로 당겨보세요. 초록 구간이 넓어서 거의 바로 쑤욱 뽑혀요.' },
+    { title: '힘은 초록 안에', short: '초록 힘 맞추기', copy: '바늘이 초록 구간에 있으면 마늘쫑이 올라와요. 빨간선 가까우면 힘을 살짝 빼세요.' },
+    { title: '저항을 따라가기', short: '화살표 따라가기', copy: '줄기가 흔들리면 짧은 화살표만 따라가세요. 실패 전에는 먼저 경고해줘요.' }
+  ];
   const formatCm = (value) => `${Number(value || 0).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}cm`;
   const scoreValue = (row) => Number(row?.cm ?? row?.score ?? 0);
 
@@ -133,12 +139,14 @@
 
   class Plant {
     constructor(stage, index, rng) {
-      const golden = (stage * 4 + index) % 9 === 8 || rng.next() < Math.min(.06 + stage * .008, .16);
+      this.lesson = stage === 1 && index < 3 ? index + 1 : 0;
+      const golden = !this.lesson && ((stage * 4 + index) % 9 === 8 || rng.next() < Math.min(.06 + stage * .008, .16));
       const pool = stage < 2 ? ['fresh', 'fresh', 'stubborn'] : ['fresh', 'stubborn', 'dancer'];
-      this.key = golden ? 'golden' : rng.pick(pool);
+      this.key = this.lesson === 3 ? 'dancer' : golden ? 'golden' : rng.pick(pool);
       this.type = TYPES[this.key];
       this.seed = rng.range(0, 100);
       this.difficulty = clamp((stage - 1) / Math.max(1, MAX_STAGE - 1), 0, .82);
+      this.assist = this.lesson === 1 ? .92 : this.lesson === 2 ? .62 : this.lesson === 3 ? .42 : clamp(.24 - (stage - 1) * .075 - index * .025, 0, .24);
       this.baseForce = rng.range(.39, .53) + this.difficulty * .08;
       this.band = Math.max(.105, rng.range(.155, .205) - this.difficulty * .07);
       this.danger = clamp(this.baseForce + this.band + rng.range(.14, .2), .72, .9);
@@ -151,6 +159,16 @@
       if (this.key === 'dancer') this.angleStrength += .17;
       if (this.key === 'stubborn') { this.band *= .9; this.baseForce += .04; }
       if (this.key === 'golden') { this.band *= .78; this.speed *= 1.1; }
+      if (this.lesson === 1) {
+        this.key = 'fresh'; this.type = TYPES.fresh;
+        this.baseForce = .34; this.band = .36; this.danger = .98; this.speed = .42; this.angleStrength = .02; this.lengthCm = 34;
+      } else if (this.lesson === 2) {
+        this.key = 'fresh'; this.type = TYPES.fresh;
+        this.baseForce = .47; this.band = .25; this.danger = .94; this.speed = .62; this.angleStrength = .1; this.lengthCm = 36;
+      } else if (this.lesson === 3) {
+        this.key = 'dancer'; this.type = TYPES.dancer;
+        this.baseForce = .48; this.band = .2; this.danger = .91; this.speed = .84; this.angleStrength = .29; this.lengthCm = 38;
+      }
       this.progress = 0;
       this.stress = 0;
       this.peakStress = 0;
@@ -168,6 +186,8 @@
       this.releaseQuality = 0;
       this.tremor = 0;
       this.slipPulse = 0;
+      this.warningPulse = 0;
+      this.graceWarnings = this.lesson === 1 ? 3 : this.lesson === 2 ? 2 : this.lesson === 3 ? 1 : this.assist > .14 ? 1 : 0;
     }
     targetForce(t) {
       const p = t * this.speed + this.seed;
@@ -471,7 +491,8 @@
       const p = this.pointerPos(e);
       const baseX = this.w / 2;
       const tipY = this.h * .285 - this.plant.progress * Math.min(205, this.h * .29);
-      if (Math.abs(p.x - baseX) > Math.min(150, this.w * .25) || p.y < tipY - 100 || p.y > this.h * .73) {
+      const grabWidth = Math.min(150 + this.plant.assist * 90, this.w * (.25 + this.plant.assist * .1));
+      if (Math.abs(p.x - baseX) > grabWidth || p.y < tipY - 112 - this.plant.assist * 35 || p.y > this.h * (.73 + this.plant.assist * .04)) {
         this.toast('줄기를 잡아 당겨주세요', ''); return;
       }
       this.sound.init();
@@ -494,6 +515,35 @@
       if (this.input.held && this.input.power > .35) this.sound.release();
       if (shouldResolve) this.releaseHarvest();
       this.input.held = false; this.input.pointerId = null; this.canvas.classList.remove('grabbing');
+      if (this.state === 'playing') this.updateUI();
+    }
+    lessonData() {
+      return FIRST_PLAY_LESSONS[this.plant?.lesson || 0] || null;
+    }
+    effectiveBand(p) {
+      return p.band * (1 + p.assist * .78);
+    }
+    angleTolerance(p) {
+      return .72 + p.assist * .46;
+    }
+    assistedPower(power, target, p) {
+      return this.input.held ? lerp(power, target, p.assist * .66) : power;
+    }
+    assistedAngle(angle, desired, p) {
+      return this.input.held ? lerp(angle, desired, p.assist * .58) : angle;
+    }
+    softCoach(text, type = '') {
+      const p = this.plant;
+      p.warningPulse = 1;
+      p.feedback = text;
+      p.stress = Math.min(p.stress, .64);
+      p.tremor = Math.min(1, p.tremor + .35);
+      this.warningCooldown = .45;
+      this.shake = Math.max(this.shake, type === 'bad' ? 4 : 2.4);
+      this.sound.warning();
+      if (navigator.vibrate) navigator.vibrate(type === 'bad' ? 35 : 18);
+      this.toast(text, type);
+      this.updateUI();
     }
     releaseHarvest() {
       const p = this.plant;
@@ -501,20 +551,39 @@
       const target = p.targetForce(this.time);
       const desired = p.targetAngle(this.time);
       const power = this.input.power;
-      const forceQ = clamp(1 - Math.abs(power - target) / p.band);
-      const angleQ = clamp(1 - Math.abs(this.input.angle - desired) / .72);
+      const judgedPower = this.assistedPower(power, target, p);
+      const judgedAngle = this.assistedAngle(this.input.angle, desired, p);
+      const forceQ = clamp(1 - Math.abs(judgedPower - target) / this.effectiveBand(p));
+      const angleQ = clamp(1 - Math.abs(judgedAngle - desired) / this.angleTolerance(p));
       const quality = forceQ * (.35 + .65 * angleQ);
+      const releaseMin = Math.max(.18, RELEASE_HARVEST_MIN - p.assist * .24);
+      const releaseThreshold = Math.max(.24, .42 - p.assist * .2);
       p.releaseQuality = quality;
 
-      if (p.progress >= AUTO_HARVEST_PROGRESS) {
+      if (p.lesson === 1 && (p.progress > .06 || power > .18)) {
+        p.progress = Math.max(p.progress, .9);
+        p.releaseQuality = Math.max(quality, .72);
         this.succeed();
-      } else if (p.progress < RELEASE_HARVEST_MIN) {
-        this.fail(`아직 ${formatCm(p.progress * p.lengthCm)}밖에 안 빠졌어요 · 조금 더 풀어낸 뒤 놓으세요`);
+      } else if (p.lesson === 1) {
+        this.softCoach('손 아이콘처럼 위로 쭉!', '');
+      } else if (p.progress >= AUTO_HARVEST_PROGRESS) {
+        this.succeed();
+      } else if (p.progress < releaseMin) {
+        if (p.graceWarnings > 0 && p.assist > 0) {
+          p.graceWarnings--;
+          this.softCoach('조금 더 올라온 뒤 놓아보세요', '');
+        } else this.fail(`아직 ${formatCm(p.progress * p.lengthCm)}밖에 안 빠졌어요 · 조금 더 풀어낸 뒤 놓으세요`);
       } else if (power > p.danger + .035 || p.stress > .92) {
-        this.fail('놓는 순간 힘이 너무 세서 마늘쫑이 끊어졌어요');
-      } else if (quality < .42) {
-        if (angleQ < .45) this.fail('마지막 각도가 틀어져 잎대 안에서 걸렸어요');
-        else if (power < target - p.band) this.fail('마지막 힘이 약해 다시 안쪽으로 미끄러졌어요');
+        if (p.graceWarnings > 0 && p.assist > 0) {
+          p.graceWarnings--;
+          this.softCoach('위험! 놓기 전 힘을 살짝 빼세요', 'bad');
+        } else this.fail('놓는 순간 힘이 너무 세서 마늘쫑이 끊어졌어요');
+      } else if (quality < releaseThreshold) {
+        if (p.graceWarnings > 0 && p.assist > 0) {
+          p.graceWarnings--;
+          this.softCoach(angleQ < .45 ? '화살표 방향으로 조금만 맞춰요' : '초록 힘 구간에 바늘을 맞춰요', '');
+        } else if (angleQ < .45) this.fail('마지막 각도가 틀어져 잎대 안에서 걸렸어요');
+        else if (power < target - this.effectiveBand(p)) this.fail('마지막 힘이 약해 다시 안쪽으로 미끄러졌어요');
         else this.fail('마지막 힘이 거칠어 마늘쫑이 상했어요');
       } else {
         this.succeed();
@@ -522,13 +591,9 @@
     }
     showTutorial(step) {
       this.tutorialStep = step;
-      const data = [
-        ['꾹 잡고 위로', '마늘쫑을 누른 채 천천히 위로 끌어 힘을 주세요.'],
-        ['지금 필요한 쪽으로', '안내는 현재 위치에서 더 움직일 방향입니다. 체크가 뜨면 그대로 유지하세요.'],
-        ['끝까지면 자동 수확', '마늘쫑이 다 올라오면 바로 쑤욱 뽑힙니다. 덜 뽑힌 상태에서는 손을 놓아 조심히 수확할 수 있어요.']
-      ][step];
+      const data = FIRST_PLAY_LESSONS[step + 1] || FIRST_PLAY_LESSONS[1];
       $('tutorial-step').textContent = `${step + 1} / 3`;
-      $('tutorial-title').textContent = data[0]; $('tutorial-copy').textContent = data[1];
+      $('tutorial-title').textContent = data.title; $('tutorial-copy').textContent = data.copy;
       $('tutorial').classList.remove('hidden');
     }
     finishTutorial() {
@@ -536,9 +601,11 @@
     }
     hideTutorial() { this.tutorialStep = -1; $('tutorial').classList.add('hidden'); }
     updateTutorial() {
-      if (this.tutorialStep === 0 && this.input.power > .3) this.showTutorial(1);
-      if (this.tutorialStep === 1 && this.plant.progress > .12) this.showTutorial(2);
-      if (this.tutorialStep === 2 && this.plant.progress > .72) this.finishTutorial();
+      if (this.tutorialDone) return;
+      if (this.stage === 1 && this.plantNo <= 3) {
+        const step = this.plantNo - 1;
+        if (this.tutorialStep !== step) this.showTutorial(step);
+      } else this.finishTutorial();
     }
     nextPlant() {
       const clearedStage = this.stage;
@@ -557,6 +624,7 @@
       }
       this.plant = new Plant(this.stage, this.plantNo - 1, this.rng);
       this.input.power = 0; this.input.angle *= .25; this.input.held = false;
+      if (!this.tutorialDone) this.updateTutorial();
       this.transitionTimer = 0; this.slow = 1; this.updateUI();
     }
     update(dt) {
@@ -593,14 +661,18 @@
       const target = p.targetForce(this.time);
       const desired = p.targetAngle(this.time);
       const power = this.input.held ? this.input.power : 0;
-      const forceDelta = Math.abs(power - target);
-      const forceQ = clamp(1 - forceDelta / p.band);
-      const angleQ = clamp(1 - Math.abs(this.input.angle - desired) / .72);
+      const effectiveBand = this.effectiveBand(p);
+      const judgedPower = this.assistedPower(power, target, p);
+      const judgedAngle = this.assistedAngle(this.input.angle, desired, p);
+      const forceDelta = Math.abs(judgedPower - target);
+      const forceQ = clamp(1 - forceDelta / effectiveBand);
+      const angleQ = clamp(1 - Math.abs(judgedAngle - desired) / this.angleTolerance(p));
       const quality = forceQ * (.35 + .65 * angleQ);
       const inZone = this.input.held && forceQ > 0 && angleQ > .34;
 
       if (inZone) {
-        const gain = (.085 + .115 * quality) * (1 + Math.min(this.stage, 10) * .012);
+        const lessonBoost = p.lesson === 1 ? .11 : p.lesson === 2 ? .045 : p.lesson === 3 ? .02 : 0;
+        const gain = (.085 + .115 * quality + lessonBoost) * (1 + Math.min(this.stage, 10) * .012);
         const previousStep = Math.floor(p.progress * 8);
         p.progress = clamp(p.progress + gain * dt, 0, AUTO_HARVEST_PROGRESS);
         const currentStep = Math.floor(p.progress * 8);
@@ -610,27 +682,32 @@
         }
         p.accuracySum += quality * dt; p.accuracyTime += dt;
         const angleError = desired - this.input.angle;
-        p.releaseReady = p.progress >= RELEASE_HARVEST_MIN && p.progress < AUTO_HARVEST_PROGRESS && quality > .48;
-        p.feedback = p.progress > .96 ? '끝까지 올라왔어요 · 쑤욱!' : p.releaseReady ? '덜 뽑혔지만 지금 놓아도 돼요' : quality > .78 ? '맞았어요 · 그대로 유지!' : angleQ < .62 ? (angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →') : '힘을 미세하게 맞춰요';
+        p.releaseReady = p.progress >= RELEASE_HARVEST_MIN - p.assist * .2 && p.progress < AUTO_HARVEST_PROGRESS && quality > .48 - p.assist * .12;
+        if (p.lesson === 1) p.feedback = p.progress > .88 ? '좋아요 · 놓아도 쑤욱!' : '그대로 위로 쭉!';
+        else if (p.lesson === 2) p.feedback = quality > .7 ? '초록 힘 딱 좋아요!' : power > target ? '살짝만 힘 빼기' : '조금 더 위로';
+        else if (p.lesson === 3) p.feedback = angleQ < .72 ? (angleError < 0 ? '← 저항 따라 왼쪽' : '저항 따라 오른쪽 →') : '흔들림 대응 좋아요!';
+        else p.feedback = p.progress > .96 ? '끝까지 올라왔어요 · 쑤욱!' : p.releaseReady ? '덜 뽑혔지만 지금 놓아도 돼요' : quality > .78 ? '맞았어요 · 그대로 유지!' : angleQ < .62 ? (angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →') : '힘을 미세하게 맞춰요';
         this.sound.tension(quality);
         if (!p.lastZone && quality > .55) this.burst(this.w / 2, this.h * .665, 'soil', 5);
       } else if (this.input.held && power > .08) {
         const angleError = desired - this.input.angle;
-        if (power < target - p.band) p.feedback = '힘이 부족해요 · 더 위로';
-        else if (power > target + p.band) p.feedback = '너무 세요! 힘을 빼세요';
+        if (p.lesson === 1) p.feedback = '괜찮아요 · 위로 조금 더';
+        else if (power < target - effectiveBand) p.feedback = '힘이 부족해요 · 더 위로';
+        else if (power > target + effectiveBand) p.feedback = '너무 세요! 힘을 빼세요';
         else p.feedback = angleError < 0 ? '← 지금 왼쪽으로' : '지금 오른쪽으로 →';
         p.releaseReady = false;
-        p.progress = Math.max(0, p.progress - dt * .009);
+        p.progress = Math.max(0, p.progress - dt * (.009 * (1 - p.assist * .55)));
       } else {
         p.releaseReady = false;
-        p.feedback = p.stress > .16 ? '쉬는 중 · 위험이 내려가요' : '잡고 천천히 당겨요';
+        p.feedback = this.lessonData()?.short || (p.stress > .16 ? '쉬는 중 · 위험이 내려가요' : '잡고 천천히 당겨요');
         p.progress = Math.max(0, p.progress - dt * .005);
       }
 
       let stressGain = 0;
-      if (this.input.held && power > target + p.band) stressGain += .23 + (power - target - p.band) * 1.65;
+      if (this.input.held && power > target + effectiveBand) stressGain += .23 + (power - target - effectiveBand) * 1.65;
       if (this.input.held && power > .25 && angleQ < .3) stressGain += (.3 - angleQ) * .42;
       if (power > p.danger) stressGain += (power - p.danger) * 1.15;
+      stressGain *= (1 - p.assist * .62);
       if (stressGain > 0) {
         p.stress = clamp(p.stress + stressGain * dt);
         p.tremor = Math.min(1, p.tremor + dt * 3);
@@ -640,14 +717,20 @@
         }
       } else {
         const recovery = power < target - .04 ? .29 : .075;
-        p.stress = Math.max(0, p.stress - recovery * dt);
+        p.stress = Math.max(0, p.stress - (recovery + p.assist * .18) * dt);
         p.tremor = Math.max(0, p.tremor - dt * 2.5);
       }
       p.peakStress = Math.max(p.peakStress, p.stress);
       p.slipPulse = Math.max(0, (p.slipPulse || 0) - dt * 5.5);
+      p.warningPulse = Math.max(0, (p.warningPulse || 0) - dt * 2.3);
       p.lastZone = inZone;
 
-      if (p.stress >= 1) this.fail(power > p.danger ? '너무 세게 당겨 마늘쫑이 끊어졌어요' : '반대 각도로 비틀어 잎대 안에서 걸렸어요');
+      if (p.stress >= 1) {
+        if (p.graceWarnings > 0) {
+          p.graceWarnings--;
+          this.softCoach(power > p.danger ? '위험! 힘을 빼면 살릴 수 있어요' : '위험! 화살표 방향으로 돌려요', 'bad');
+        } else this.fail(power > p.danger ? '너무 세게 당겨 마늘쫑이 끊어졌어요' : '반대 각도로 비틀어 잎대 안에서 걸렸어요');
+      }
       else if (p.progress >= AUTO_HARVEST_PROGRESS) { p.releaseQuality = quality; this.succeed(); }
       this.updateUI(target);
     }
@@ -724,7 +807,10 @@
       $('hud-player').textContent = this.profile ? `· ${this.profile.name}` : '';
       $('combo').textContent = `x${this.combo + 1}`; $('combo').classList.toggle('active', this.combo > 0);
       $('action-hint').textContent = p.resolved ? (p.failReason ? '다음 마늘쫑 준비 중…' : '기분 좋게 쑤욱!') : p.feedback;
-      const lower = clamp(target - p.band); const width = clamp(p.band * 2, 0, 1 - lower);
+      $('meter-panel').classList.toggle('lesson-mode', Boolean(p.lesson && !p.resolved));
+      $('meter-panel').classList.toggle('warning-mode', Boolean(!p.resolved && (p.warningPulse > 0 || p.stress > .62)));
+      const band = this.effectiveBand(p);
+      const lower = clamp(target - band); const width = clamp(band * 2, 0, 1 - lower);
       $('safe-band').style.left = `${lower * 100}%`; $('safe-band').style.width = `${width * 100}%`;
       $('danger-line').style.left = `${p.danger * 100}%`;
       const power = this.input.held ? this.input.power : 0;
@@ -923,6 +1009,47 @@
       ctx.fillText(`${number}번 ${done ? '수확' : '대기'}`, 0, 40);
       ctx.restore();
     }
+    drawLessonCoach(ctx, stemTopX, neckY, sheathTop) {
+      const p = this.plant;
+      const lesson = this.lessonData();
+      if (!lesson || p.resolved) return;
+      const w = this.w, h = this.h;
+      const bubbleW = Math.min(250, w - 34);
+      const bubbleX = clamp(stemTopX - (w < 540 ? 0 : 150), bubbleW / 2 + 12, w - bubbleW / 2 - 12);
+      const bubbleY = clamp(neckY - 84, h * .15, sheathTop - 62);
+      const pulse = 1 + Math.sin(this.time * 6) * .018;
+
+      ctx.save();
+      ctx.translate(bubbleX, bubbleY);
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = p.warningPulse > 0 ? 'rgba(255,238,213,.97)' : 'rgba(255,252,225,.96)';
+      ctx.strokeStyle = p.warningPulse > 0 ? '#e46c4f' : '#5c8f49';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(-bubbleW / 2, -24, bubbleW, 48, 17); ctx.fill(); ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = p.warningPulse > 0 ? '#c84f3f' : '#335b35';
+      ctx.font = '950 15px sans-serif';
+      ctx.fillText(p.warningPulse > 0 ? '위험! 힘을 살짝 빼요' : lesson.short, 0, -2);
+      ctx.restore();
+
+      if (!this.input.held || p.lesson === 1) {
+        const handTravel = (Math.sin(this.time * 3.2) + 1) * .5;
+        const handX = clamp(stemTopX - (w < 540 ? 64 : 90), 46, w - 46);
+        const handY = neckY + 58 - handTravel * 42;
+        ctx.save();
+        ctx.globalAlpha = .78 + Math.sin(this.time * 5) * .12;
+        ctx.strokeStyle = '#fff5bd'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(handX, neckY + 68); ctx.lineTo(handX, neckY + 14); ctx.stroke();
+        ctx.fillStyle = '#fff5bd'; ctx.beginPath(); ctx.moveTo(handX, neckY + 8); ctx.lineTo(handX - 9, neckY + 22); ctx.lineTo(handX + 9, neckY + 22); ctx.closePath(); ctx.fill();
+        ctx.font = `${w < 500 ? 30 : 36}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('☝️', handX, handY);
+        ctx.fillStyle = '#fff8d5'; ctx.strokeStyle = '#375c33'; ctx.lineWidth = 4; ctx.font = '900 12px sans-serif';
+        ctx.strokeText('위로 당기기', handX, neckY + 90);
+        ctx.fillText('위로 당기기', handX, neckY + 90);
+        ctx.restore();
+      }
+    }
     drawPlant(ctx) {
       const p = this.plant, w = this.w, h = this.h, ground = h * .66, x = w / 2;
       const targetA = p.targetAngle(this.time);
@@ -1063,6 +1190,7 @@
           ctx.strokeStyle = 'rgba(255,255,225,.8)'; ctx.lineWidth = 3; ctx.setLineDash([5,5]);
           ctx.beginPath(); ctx.arc(stemTopX, neckY + 15, 34 + Math.sin(this.time * 4) * 3, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
         }
+        this.drawLessonCoach(ctx, stemTopX, neckY, sheathTop);
       }
     }
     garlicLeaf(ctx, x, y, dx, dy, width, color) {
@@ -1156,9 +1284,26 @@
       }
       ctx.restore();
     }
+    drawWarningOverlay(ctx) {
+      const p = this.plant;
+      if (this.state !== 'playing' || !p || p.resolved || p.warningPulse <= 0) return;
+      const a = clamp(p.warningPulse);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = 'rgba(231,82,63,.75)'; ctx.lineWidth = 8;
+      ctx.strokeRect(8, 8, this.w - 16, this.h - 16);
+      ctx.fillStyle = 'rgba(255,246,211,.94)';
+      ctx.strokeStyle = '#db654f'; ctx.lineWidth = 3;
+      const y = this.h * .2, width = Math.min(270, this.w - 28);
+      ctx.beginPath(); ctx.roundRect(this.w / 2 - width / 2, y - 23, width, 46, 18); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#bd493d'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '950 16px sans-serif';
+      ctx.fillText('끊어지기 직전 · 힘 빼기!', this.w / 2, y);
+      ctx.restore();
+    }
     drawForeground(ctx) {
       if (this.state === 'playing' || this.state === 'gameover') this.drawHarvestPile(ctx);
       this.drawFieldClear(ctx);
+      this.drawWarningOverlay(ctx);
       if (this.stageBanner > 0 && this.state === 'playing') {
         const a = Math.min(1, this.stageBanner * 2, (1.8 - this.stageBanner) * 3);
         ctx.save(); ctx.globalAlpha = clamp(a); ctx.textAlign = 'center';
