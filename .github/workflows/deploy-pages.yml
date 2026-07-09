@@ -28,13 +28,17 @@ jobs:
         run: |
           mkdir _site
           cp index.html styles.css game.js _site/
-          cat > _site/supabase-config.js <<EOF
-          window.GARLIC_WORLD_RANKING = {
-            url: '${SUPABASE_URL}',
-            anonKey: '${SUPABASE_ANON_KEY}',
-            table: 'garlic_rankings'
-          };
-          EOF
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            cat > _site/supabase-config.js <<EOF
+window.GARLIC_WORLD_RANKING = {
+  url: '${SUPABASE_URL}',
+  anonKey: '${SUPABASE_ANON_KEY}',
+  table: 'garlic_rankings'
+};
+EOF
+          else
+            cp supabase-config.js _site/
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
