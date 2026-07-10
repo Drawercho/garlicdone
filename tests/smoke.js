@@ -12,6 +12,7 @@ function fakeElement(id) {
     style: {},
     classList: new FakeClassList(),
     textContent: '',
+    innerHTML: '',
     addEventListener() {},
     getBoundingClientRect() { return { left: 0, top: 0, width: 960, height: 640 }; },
     getContext() { return { setTransform() {} }; },
@@ -84,6 +85,8 @@ assert.equal(game.plant.resolved, true, 'full pull should auto-harvest without r
 assert.equal(game.plant.failReason, '', 'auto-harvest should not fail with skillful input');
 
 game.nextPlant();
+assert.equal(game.plant.lesson, 0, 'fourth scape should leave tutorial mode');
+assert.ok(game.plant.assist >= .25, 'fourth scape should bridge tutorial and normal play gently');
 const livesBefore = game.lives;
 
 const desiredAngle = game.plant.targetAngle(game.time);
@@ -101,10 +104,13 @@ for (let i = 0; i < 360 && !game.plant.resolved; i++) {
 }
 
 assert.ok(game.plant.failReason, 'reckless input should explain its failure');
+assert.ok(game.plant.failTip, 'failure should include a useful next-attempt tip');
 assert.equal(game.lives, livesBefore - 1, 'failure should consume one chance');
 assert.equal(game.combo, 0, 'failure should reset combo');
 
 game.gameOver();
+assert.ok(elements.get('result-stats').innerHTML.includes('숙련도'), 'result screen should summarize mastery stats');
+assert.ok(elements.get('result-goal').textContent.includes('다음 목표'), 'result screen should offer a replay goal');
 const ranking = JSON.parse(localStorage.getItem('garlic-world-cache'));
 assert.equal(ranking[0].name, '테스트농부', 'ranking should use the active nickname');
 assert.ok(ranking[0].cm > 0, 'ranking should save harvested centimeters');

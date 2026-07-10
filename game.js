@@ -147,6 +147,7 @@
       this.seed = rng.range(0, 100);
       this.difficulty = clamp((stage - 1) / Math.max(1, MAX_STAGE - 1), 0, .82);
       this.assist = this.lesson === 1 ? .92 : this.lesson === 2 ? .62 : this.lesson === 3 ? .42 : clamp(.24 - (stage - 1) * .075 - index * .025, 0, .24);
+      if (!this.lesson && stage === 1) this.assist = Math.max(this.assist, .28);
       this.baseForce = rng.range(.39, .53) + this.difficulty * .08;
       this.band = Math.max(.105, rng.range(.155, .205) - this.difficulty * .07);
       this.danger = clamp(this.baseForce + this.band + rng.range(.14, .2), .72, .9);
@@ -188,6 +189,11 @@
       this.slipPulse = 0;
       this.warningPulse = 0;
       this.graceWarnings = this.lesson === 1 ? 3 : this.lesson === 2 ? 2 : this.lesson === 3 ? 1 : this.assist > .14 ? 1 : 0;
+      this.signalKind = 'idle';
+      this.signalText = '';
+      this.nearPullPulse = 0;
+      this.nearAnnounced = false;
+      this.failTip = '';
     }
     targetForce(t) {
       const p = t * this.speed + this.seed;
@@ -298,6 +304,8 @@
       this.state = this.profile ? 'title' : 'login';
       this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES;
       this.best = Number(localStorage.getItem('garlic-best') || 0);
+      this.bestCombo = Number(localStorage.getItem('garlic-best-combo') || 0);
+      this.bestPerfect = Number(localStorage.getItem('garlic-best-perfect') || 0);
       this.plant = new Plant(1, 0, this.rng);
       this.particles = [];
       this.time = 0;
@@ -378,7 +386,7 @@
       list.innerHTML = rows.map((row, index) => {
         const mine = row.name === this.profile?.name ? ' me' : '';
         const date = new Date(row.time).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
-        return `<div class="rank-row${mine}"><span class="rank-pos">${medals[index] || index + 1}</span><span class="rank-name">${escape(row.name)}<small>밭 ${row.stage} · ${row.harvested || 0}줄기 · ${date}</small></span><strong class="rank-score">${formatCm(scoreValue(row))}</strong></div>`;
+        return `<div class="rank-row${mine}"><span class="rank-pos">${medals[index] || index + 1}</span><span class="rank-name">${escape(row.name)}<small>밭 ${row.stage} · ${row.harvested || 0}줄기 · 완벽 ${row.perfectCount || 0} · ${date}</small></span><strong class="rank-score">${formatCm(scoreValue(row))}</strong></div>`;
       }).join('');
     }
     async refreshWorldRanking() {
@@ -532,6 +540,24 @@
     assistedAngle(angle, desired, p) {
       return this.input.held ? lerp(angle, desired, p.assist * .58) : angle;
     }
+    coachSignal(p, target, desired, power, forceQ, angleQ) {
+      if (!this.input.held) return { kind: 'idle', text: this.lessonData()?.short || '잡고 천천히 당겨요' };
+      if (p.warningPulse > 0 || p.stress > .72 || power > p.danger) return { kind: 'danger', text: '힘 빼기!' };
+      if (power < target - this.effectiveBand(p) * .55) return { kind: 'low', text: '더 위로' };
+      if (power > target + this.effectiveBand(p) * .55) return { kind: 'high', text: '힘 빼기' };
+      const angleError = desired - this.input.angle;
+      if (angleQ < .7 && Math.abs(angleError) > .14) return { kind: angleError < 0 ? 'left' : 'right', text: angleError < 0 ? '왼쪽' : '오른쪽' };
+      if (p.releaseReady || p.progress > .82) return { kind: 'ready', text: '쑤욱!' };
+      if (forceQ > .72 && angleQ > .72) return { kind: 'good', text: '좋아요' };
+      return { kind: 'steady', text: '유지' };
+    }
+    failAdvice(reason) {
+      if (reason.includes('너무 세게') || reason.includes('힘이 너무')) return '힘이 빨간선 근처까지 올라갔어요. 다음엔 초록 구간 끝에서 살짝 빼세요.';
+      if (reason.includes('각도') || reason.includes('반대 각도') || reason.includes('비틀')) return '줄기가 기우는 쪽과 손 방향이 어긋났어요. 화살표가 뜨면 그쪽으로 짧게 보정하세요.';
+      if (reason.includes('약해') || reason.includes('미끄러')) return '마지막 힘이 부족했어요. 초록 구간 안에서 조금 더 버티면 빠져나옵니다.';
+      if (reason.includes('아직')) return '마늘쫑 노출 게이지가 덜 찼어요. 조금 더 올라온 뒤 놓아보세요.';
+      return '힘, 각도, 놓는 타이밍 중 하나가 흐트러졌어요. 화면의 짧은 문구를 따라 다시 잡아보세요.';
+    }
     softCoach(text, type = '') {
       const p = this.plant;
       p.warningPulse = 1;
@@ -669,6 +695,9 @@
       const angleQ = clamp(1 - Math.abs(judgedAngle - desired) / this.angleTolerance(p));
       const quality = forceQ * (.35 + .65 * angleQ);
       const inZone = this.input.held && forceQ > 0 && angleQ > .34;
+      const signal = this.coachSignal(p, target, desired, power, forceQ, angleQ);
+      p.signalKind = signal.kind;
+      p.signalText = signal.text;
 
       if (inZone) {
         const lessonBoost = p.lesson === 1 ? .11 : p.lesson === 2 ? .045 : p.lesson === 3 ? .02 : 0;
@@ -712,6 +741,7 @@
         p.stress = clamp(p.stress + stressGain * dt);
         p.tremor = Math.min(1, p.tremor + dt * 3);
         if (p.stress > .63 && this.warningCooldown <= 0) {
+          p.warningPulse = Math.max(p.warningPulse, .55);
           this.sound.warning(); this.warningCooldown = .48; this.shake = Math.max(this.shake, 2.3);
           if (navigator.vibrate) navigator.vibrate(25);
         }
@@ -723,6 +753,14 @@
       p.peakStress = Math.max(p.peakStress, p.stress);
       p.slipPulse = Math.max(0, (p.slipPulse || 0) - dt * 5.5);
       p.warningPulse = Math.max(0, (p.warningPulse || 0) - dt * 2.3);
+      if (!p.resolved && p.progress > .78) {
+        p.nearPullPulse = Math.min(1, p.nearPullPulse + dt * 2.8);
+        if (!p.nearAnnounced && p.progress > .84) {
+          p.nearAnnounced = true;
+          this.shake = Math.max(this.shake, 3);
+          this.burst(this.w / 2, this.h * .51, 'fiber', 12);
+        }
+      } else p.nearPullPulse = Math.max(0, p.nearPullPulse - dt * 3);
       p.lastZone = inZone;
 
       if (p.stress >= 1) {
@@ -750,28 +788,52 @@
       p.cm = Math.round((usableLength * p.type.cmBonus + comboCm + finishCm) * 10) / 10;
       this.score = Math.round((this.score + p.cm) * 10) / 10; p.resolved = true; p.outcomeTime = 0;
       this.input.held = false; this.canvas.classList.remove('grabbing');
-      this.shake = p.perfect ? 14 : 9; this.flash = 1; this.slow = .25;
+      const streakPop = this.combo > 0 && this.combo % 4 === 0;
+      this.shake = p.perfect ? 18 : streakPop ? 13 : 9; this.flash = p.perfect ? 1.15 : 1; this.slow = p.perfect ? .18 : .25;
       this.sound.success(p.perfect);
       if (navigator.vibrate) navigator.vibrate(p.perfect ? [25, 25, 70] : [20, 20, 45]);
-      this.burst(this.w / 2, this.h * .59, p.perfect ? 'perfect' : 'success', p.perfect ? 58 : 36);
-      this.popScore(`${p.perfect ? '완벽 뽑기! ' : '쑤욱! '}+${formatCm(p.cm)}`);
-      this.toast(p.perfect ? '손맛 최고! 온전한 한 줄기' : `${p.type.name} 수확!`, 'good');
+      this.burst(this.w / 2, this.h * .59, p.perfect ? 'perfect' : 'success', p.perfect ? 76 : streakPop ? 48 : 36);
+      if (streakPop) this.burst(this.w / 2, this.h * .34, 'perfect', 18);
+      this.popScore(`${p.perfect ? '완벽 뽑기! ' : streakPop ? `${this.combo}콤보 쑤욱! ` : '쑤욱! '}+${formatCm(p.cm)}`);
+      this.toast(p.perfect ? '손맛 최고! 온전한 한 줄기' : streakPop ? `${this.combo}연속 수확! 감 잡았어요` : `${p.type.name} 수확!`, 'good');
       this.saveBest(); this.updateUI();
     }
     fail(reason) {
       const p = this.plant; if (p.resolved) return;
-      p.failReason = reason; p.resolved = true; p.outcomeTime = 0; this.lives--; this.combo = 0;
+      p.failReason = reason; p.failTip = this.failAdvice(reason); p.resolved = true; p.outcomeTime = 0; this.lives--; this.combo = 0;
+      this.lastFailReason = reason; this.lastFailTip = p.failTip;
       this.input.held = false; this.canvas.classList.remove('grabbing'); this.shake = 8;
       this.sound.fail(); if (navigator.vibrate) navigator.vibrate(60);
       this.burst(this.w / 2, this.h * .47, 'fail', 25);
       this.toast(reason, 'bad'); this.updateUI();
     }
+    masteryGrade() {
+      const perfectRate = this.harvested ? this.perfectCount / this.harvested : 0;
+      if (this.completed && perfectRate >= .55 && this.maxCombo >= 10) return '쑥 장인';
+      if (this.completed) return '완주 농부';
+      if (this.stage >= 4 || this.maxCombo >= 8) return '숙련 농부';
+      if (this.harvested >= 6 || this.maxCombo >= 4) return '감 잡은 농부';
+      return '새싹 농부';
+    }
+    nextGoalText(isNewBest) {
+      if (this.completed && this.perfectCount < Math.max(8, Math.ceil(this.harvested * .5))) return '다음 목표: 만렙 완주 유지하면서 완벽 뽑기 비율 50% 넘기기.';
+      if (this.completed && this.maxCombo < PLANTS_PER_STAGE * MAX_STAGE) return '다음 목표: 끊기지 않고 20연속 콤보 완주하기.';
+      if (this.completed) return isNewBest ? '월드 랭킹용 기록감이에요. 이제 완벽 수확 수로 자기 자신과 싸워볼 차례!' : '만렙 이후 목표: 최고 cm, 완벽 수확, 20콤보를 동시에 노려보세요.';
+      if (this.lastFailTip) return `다음 목표: ${this.lastFailTip}`;
+      return `다음 목표: 밭 ${Math.min(MAX_STAGE, this.stage + 1)}까지 안정적으로 가기. 초록 구간에서 버티는 시간이 실력입니다.`;
+    }
     gameOver() {
       const isNewBest = this.score > this.best;
-      this.state = 'gameover'; this.saveBest(); this.saveRunToRanking(); this.hideTutorial();
+      this.state = 'gameover'; this.saveBest(); this.saveBestStats(); this.saveRunToRanking(); this.hideTutorial();
       $('result-title').textContent = this.completed ? '만렙 밭 완주!' : isNewBest && this.score > 0 ? '새로운 최고 기록!' : '오늘 수확 끝!';
       $('final-score').textContent = formatCm(this.score);
       $('result-copy').textContent = `${this.profile?.name || '농부'}님은 마늘쫑 ${this.harvested}줄기를 ${formatCm(this.score)} 수확해 밭 ${this.stage}/${MAX_STAGE}까지 도착했습니다.`;
+      $('result-stats').innerHTML = [
+        `<span>숙련도<strong>${this.masteryGrade()}</strong></span>`,
+        `<span>최대 콤보<strong>x${this.maxCombo}</strong></span>`,
+        `<span>완벽 수확<strong>${this.perfectCount}줄</strong></span>`
+      ].join('');
+      $('result-goal').textContent = this.nextGoalText(isNewBest);
       $('result-eyebrow').textContent = `최고 기록 ${formatCm(this.best)}`;
       $('result-card').classList.remove('hidden'); $('start-card').classList.add('hidden');
       $('overlay').classList.add('visible'); $('meter-panel').classList.add('hidden-panel');
@@ -779,6 +841,10 @@
     saveBest() {
       if (this.score > this.best) { this.best = this.score; localStorage.setItem('garlic-best', String(this.best)); }
       $('best-score').textContent = formatCm(this.best);
+    }
+    saveBestStats() {
+      if (this.maxCombo > this.bestCombo) { this.bestCombo = this.maxCombo; localStorage.setItem('garlic-best-combo', String(this.bestCombo)); }
+      if (this.perfectCount > this.bestPerfect) { this.bestPerfect = this.perfectCount; localStorage.setItem('garlic-best-perfect', String(this.bestPerfect)); }
     }
     burst(x, y, kind, count) {
       const presets = {
@@ -1050,6 +1116,62 @@
         ctx.restore();
       }
     }
+    drawPullHandle(ctx, stemTopX, neckY, sheathTop) {
+      const p = this.plant;
+      if (p.resolved) return;
+      const demo = p.lesson && !this.input.held;
+      if (!this.input.held && !demo) return;
+      const w = this.w;
+      const power = this.input.held ? this.input.power : .28 + Math.sin(this.time * 3) * .04;
+      const angle = this.input.held ? this.input.angle : p.targetAngle(this.time) * .35;
+      const hx = clamp(stemTopX + angle * Math.min(96, w * .18), 36, w - 36);
+      const hy = clamp(neckY + 74 - power * 110, this.h * .12, sheathTop + 82);
+      const colors = {
+        danger: ['#e35b4d', '#fff0dc'],
+        high: ['#e8843d', '#fff4bf'],
+        low: ['#e0ad41', '#fff7c6'],
+        left: ['#5a9ed4', '#e8f7ff'],
+        right: ['#5a9ed4', '#e8f7ff'],
+        ready: ['#5ec95d', '#fffbd2'],
+        good: ['#4fb85a', '#f4ffd5'],
+        steady: ['#79a65a', '#fffbd2'],
+        idle: ['#79a65a', '#fffbd2']
+      };
+      const [line, fill] = colors[p.signalKind] || colors.steady;
+      const tension = clamp(power * .65 + p.stress * .5 + p.progress * .25);
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = line;
+      ctx.lineWidth = 4 + tension * 4;
+      ctx.globalAlpha = .72 + tension * .22;
+      ctx.beginPath();
+      ctx.moveTo(stemTopX, neckY + 12);
+      ctx.quadraticCurveTo(lerp(stemTopX, hx, .5), lerp(neckY, hy, .5) + Math.sin(this.time * 12) * tension * 4, hx, hy);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = fill; ctx.strokeStyle = line; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(hx - 34, hy - 14, 68, 28, 13); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#355135'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '950 12px sans-serif';
+      ctx.fillText(p.signalText || '당기기', hx, hy + 1);
+      ctx.restore();
+    }
+    drawFailureCue(ctx, x, sheathTop, p) {
+      if (!p.failReason) return;
+      const t = clamp(p.outcomeTime / .35);
+      const width = Math.min(330, this.w - 30);
+      const y = Math.max(this.h * .16, sheathTop - 96 - easeOut(t) * 10);
+      ctx.save();
+      ctx.globalAlpha = clamp(t);
+      ctx.fillStyle = 'rgba(255,242,219,.96)';
+      ctx.strokeStyle = '#d96a52'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(this.w / 2 - width / 2, y - 34, width, 68, 19); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#bd493d'; ctx.textAlign = 'center'; ctx.font = '950 14px sans-serif';
+      const title = p.failReason.includes('세게') ? '힘이 너무 셌어요' : p.failReason.includes('각도') || p.failReason.includes('비틀') ? '각도가 틀어졌어요' : p.failReason.includes('아직') ? '아직 덜 빠졌어요' : '흐름이 끊겼어요';
+      ctx.fillText(title, this.w / 2, y - 9);
+      ctx.fillStyle = '#5f5b49'; ctx.font = '800 11px sans-serif';
+      ctx.fillText(p.failTip.slice(0, 34), this.w / 2, y + 14);
+      ctx.restore();
+    }
     drawPlant(ctx) {
       const p = this.plant, w = this.w, h = this.h, ground = h * .66, x = w / 2;
       const targetA = p.targetAngle(this.time);
@@ -1157,6 +1279,20 @@
       ctx.save(); ctx.strokeStyle = p.stress > .65 ? '#e78467' : '#e5f0b6'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.ellipse(x + targetA * 5, sheathTop + 1, 14 - p.stress * 2, 5.5, targetA * .08, 0, Math.PI); ctx.stroke(); ctx.restore();
 
+      if (!p.resolved && p.progress > .78) {
+        const a = clamp((p.progress - .78) / .2);
+        ctx.save();
+        ctx.globalAlpha = .28 + a * .34 + Math.sin(this.time * 17) * .08;
+        ctx.strokeStyle = p.progress > .94 ? '#fff4a8' : '#e8f0b7';
+        ctx.lineWidth = 4 + a * 3;
+        ctx.beginPath(); ctx.ellipse(x, sheathTop + 4, 28 + a * 9, 11 + a * 4, targetA * .1, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#fff8c8'; ctx.strokeStyle = '#44643b'; ctx.lineWidth = 3;
+        ctx.font = '950 13px sans-serif'; ctx.textAlign = 'center';
+        ctx.strokeText(p.progress > .94 ? '거의 다!' : '버티면 빠져요', x, sheathTop - 26);
+        ctx.fillText(p.progress > .94 ? '거의 다!' : '버티면 빠져요', x, sheathTop - 26);
+        ctx.restore();
+      }
+
       // Early callout teaches that the outer garlic plant remains behind.
       if (p.progress < .16 && !p.resolved) {
         const side = w < 500 ? -1 : 1;
@@ -1191,7 +1327,9 @@
           ctx.beginPath(); ctx.arc(stemTopX, neckY + 15, 34 + Math.sin(this.time * 4) * 3, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
         }
         this.drawLessonCoach(ctx, stemTopX, neckY, sheathTop);
+        this.drawPullHandle(ctx, stemTopX, neckY, sheathTop);
       }
+      if (p.resolved && p.failReason) this.drawFailureCue(ctx, x, sheathTop, p);
     }
     garlicLeaf(ctx, x, y, dx, dy, width, color) {
       ctx.save(); ctx.translate(x, y);

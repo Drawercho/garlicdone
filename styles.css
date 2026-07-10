@@ -200,6 +200,39 @@ h1 em { color: #e67c3b; font-style: normal; text-shadow: 0 5px 0 #f4cb65; }
 .result-card h2 { margin: 0; font-size: 36px; letter-spacing: -.06em; }
 .final-score { margin: 10px 0; color: #e07938; font-size: 58px; font-weight: 950; font-variant-numeric: tabular-nums; }
 .result-card > p:not(.eyebrow) { min-height: 42px; color: #626b56; line-height: 1.55; }
+.result-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin: 14px 0 10px;
+}
+.result-stats span {
+  padding: 9px 7px;
+  border: 1px solid #ddd2a1;
+  border-radius: 13px;
+  background: rgba(255,255,255,.45);
+  color: #536047;
+  font-size: 10px;
+  font-weight: 900;
+}
+.result-stats strong {
+  display: block;
+  margin-top: 3px;
+  color: #df7438;
+  font-size: 15px;
+}
+.result-goal {
+  min-height: 0 !important;
+  margin: 8px 0 15px;
+  padding: 9px 12px;
+  border-radius: 13px;
+  background: #edf3c8;
+  color: #4e6245 !important;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.45 !important;
+  word-break: keep-all;
+}
 
 .login-card { width: min(410px, 100%); }
 .login-mark { display: grid; place-items: center; width: 60px; height: 60px; margin: -2px auto 10px; border-radius: 19px; background: #e5efb7; box-shadow: inset 0 -5px 0 rgba(89,113,55,.12); font-size: 32px; }
