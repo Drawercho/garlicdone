@@ -271,6 +271,34 @@ h1 em { color: #e67c3b; font-style: normal; text-shadow: 0 5px 0 #f4cb65; }
 .hidden { display: none !important; }
 .result-card h2 { margin: 0; font-size: clamp(28px, 5vmin, 36px); letter-spacing: -.06em; }
 .final-score { margin: clamp(5px, 1.5vmin, 10px) 0; color: #e07938; font-size: clamp(38px, 8vmin, 58px); font-weight: 950; font-variant-numeric: tabular-nums; }
+.result-player-title {
+  margin: -2px 0 9px;
+  padding: 10px 12px;
+  border: 1px solid #e0cf8d;
+  border-radius: 15px;
+  background: linear-gradient(135deg, rgba(255,246,196,.86), rgba(237,243,200,.74));
+  color: #4f6244;
+  line-height: 1.38;
+}
+.result-player-title strong {
+  display: block;
+  color: #db7438;
+  font-size: 17px;
+  font-weight: 950;
+}
+.result-player-title span {
+  display: inline-block;
+  margin-bottom: 2px;
+  color: #6c7448;
+  font-size: 10px;
+  font-weight: 950;
+}
+.result-player-title p {
+  margin: 3px 0 0;
+  color: #667153;
+  font-size: 11px;
+  font-weight: 850;
+}
 .result-card > p:not(.eyebrow) { min-height: 42px; color: #626b56; line-height: 1.55; }
 .result-stats {
   display: grid;
@@ -444,6 +472,9 @@ h1 em { color: #e67c3b; font-style: normal; text-shadow: 0 5px 0 #f4cb65; }
   .login-card > p:not(.eyebrow) { margin: 9px 0 12px; }
   .login-mark { width: 46px; height: 46px; font-size: 25px; }
   .result-card > p:not(.eyebrow) { min-height: 0; margin: 5px 0; font-size: 12px; line-height: 1.35; }
+  .result-player-title { margin-bottom: 6px; padding: 7px 9px; }
+  .result-player-title strong { font-size: 14px; }
+  .result-player-title p { font-size: 10px; }
   .result-stats { margin: 8px 0 6px; }
   .result-stats span { padding: 6px 5px; }
   .result-goal { margin: 5px 0 9px; padding: 7px 10px; font-size: 11px; line-height: 1.32 !important; }
@@ -469,6 +500,9 @@ h1 em { color: #e67c3b; font-style: normal; text-shadow: 0 5px 0 #f4cb65; }
   .field-error { min-height: 16px; padding: 1px 4px; }
   .login-card input { height: 42px; }
   .result-card > p:not(.eyebrow) { display: none; }
+  .result-player-title { margin: -2px 0 5px; padding: 5px 8px; }
+  .result-player-title strong { font-size: 12px; }
+  .result-player-title p { display: none; }
   .result-stats { gap: 5px; }
   .result-stats strong { font-size: 13px; }
   .result-goal { margin-bottom: 7px; }

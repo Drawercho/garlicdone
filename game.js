@@ -6,8 +6,8 @@
   const lerp = (a, b, t) => a + (b - a) * t;
   const mixRgb = (t, from, to) => `rgb(${Math.round(lerp(from[0], to[0], t))}, ${Math.round(lerp(from[1], to[1], t))}, ${Math.round(lerp(from[2], to[2], t))})`;
   const easeOut = (t) => 1 - Math.pow(1 - clamp(t), 3);
-  const START_LIVES = 5;
-  const MAX_LIVES = 5;
+  const START_LIVES = 2;
+  const MAX_LIVES = 2;
   const PLANTS_PER_STAGE = 3;
   const MAX_STAGE = 3;
   const MAX_LEVEL = 10;
@@ -360,6 +360,7 @@
       this.rankingStatus = this.worldRanking.enabled ? '월드 랭킹을 불러오는 중…' : 'Supabase 연결 대기 중';
       this.lastRunEntry = null;
       this.lastShareText = '';
+      this.resultPlayerTitle = null;
       this.installPrompt = null;
       this.state = this.profile ? 'title' : 'login';
       this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES;
@@ -573,6 +574,66 @@
         behind: index >= 0 && index < rows.length - 1 ? rows[index + 1] : null
       };
     }
+    resultTitleData() {
+      const summary = this.currentResultRank();
+      return {
+        score: this.score,
+        level: this.level,
+        levelMaxed: this.levelMaxed,
+        rank: summary.rank,
+        total: summary.total,
+        time: this.levelMaxed ? this.levelMaxTime : this.runTime,
+        combo: this.maxCombo,
+        perfectCount: this.perfectCount,
+        harvested: this.harvested,
+        completed: this.completed
+      };
+    }
+    calculateResultTitle(data = this.resultTitleData()) {
+      const score = Number(data.score || 0);
+      const level = Number(data.level || 1);
+      const rank = Number(data.rank || 0);
+      const total = Number(data.total || 0);
+      const time = Number(data.time || 0);
+      const combo = Number(data.combo || 0);
+      const perfectCount = Number(data.perfectCount || 0);
+      const harvested = Number(data.harvested || 0);
+      const levelMaxed = Boolean(data.levelMaxed);
+      const completed = Boolean(data.completed);
+      const topRank = rank > 0 && (rank <= 3 || (total >= 10 && rank / total <= .1));
+
+      if (score >= 440 && levelMaxed && completed && time > 0 && time <= 50) {
+        return { title: '마늘쫑계의 부르즈 칼리파', description: '높이도 기록도 하늘을 찔렀습니다. 오늘 밭의 랜드마크예요.', tier: 'myth' };
+      }
+      if (score >= 420 && levelMaxed && (topRank || combo >= PLANTS_PER_STAGE * MAX_STAGE)) {
+        return { title: '갓 뽑기의 신', description: '이 정도면 랭킹판에 이름 새겨도 됩니다.', tier: 'legend' };
+      }
+      if (score >= 395 && completed && time > 0 && time <= 55) {
+        return { title: '속전속결 수확왕', description: '빠른데 섬세합니다. 마늘쫑이 도망갈 틈이 없었어요.', tier: 'speed' };
+      }
+      if (score >= 370 && (combo >= 7 || perfectCount >= 4)) {
+        return { title: '콤보 폭주 기관차', description: '한 번 리듬 타면 밭 끝까지 밀고 가는 손맛입니다.', tier: 'combo' };
+      }
+      if (score >= 340 || levelMaxed) {
+        return { title: '마늘쫑 장인', description: '힘 조절과 타이밍을 제법 몸으로 익혔습니다.', tier: 'master' };
+      }
+      if (score >= 280 || level >= 8 || topRank) {
+        return { title: '랭킹 노려볼 만한 실력', description: '조금만 더 다듬으면 상위권 문패가 보입니다.', tier: 'pro' };
+      }
+      if (score >= 210 || level >= 6) {
+        return { title: '위메이드플레이 루키', description: '감은 확실히 잡았습니다. 이제 손끝 디테일 싸움이에요.', tier: 'rookie' };
+      }
+      if (score >= 100 || harvested >= 3) {
+        return { title: '마늘쫑 견습생', description: '쑥 뽑히는 감각을 익히는 중입니다.', tier: 'apprentice' };
+      }
+      return { title: '아직 손맛 보는 중', description: '오늘은 예열만 했다 치죠. 다음 판에 바로 감 옵니다.', tier: 'sprout' };
+    }
+    renderResultPlayerTitle() {
+      const box = $('result-player-title');
+      if (!box) return;
+      const badge = this.resultPlayerTitle || this.calculateResultTitle();
+      box.innerHTML = `<span>🏅 칭호</span><strong>${this.escapeHtml(badge.title)}</strong><p>${this.escapeHtml(badge.description)}</p>`;
+    }
     renderResultRanking() {
       const box = $('result-ranking-summary');
       if (!box) return;
@@ -603,15 +664,19 @@
     buildShareText() {
       const name = this.profile?.name || '농부';
       const time = this.levelMaxed ? formatTime(this.levelMaxTime) : formatTime(this.runTime);
-      return `🎮 마늘쫑 뽑기 완료! ${name}님의 수확 기록은 ${formatCm(this.score)}, ${this.resultRankText()}입니다! Lv.${this.level}/${MAX_LEVEL} · ${time} · 완벽 ${this.perfectCount}줄 · 최대 콤보 x${this.maxCombo}`;
+      const badge = this.resultPlayerTitle || this.calculateResultTitle();
+      return `🎮 마늘쫑 뽑기 완료! ${name}님의 수확 기록은 ${formatCm(this.score)}, ${this.resultRankText()}, 칭호는 "${badge.title}"입니다! Lv.${this.level}/${MAX_LEVEL} · ${time} · 완벽 ${this.perfectCount}줄 · 최대 콤보 x${this.maxCombo}`;
     }
     shareCardData() {
       const summary = this.currentResultRank();
+      const badge = this.resultPlayerTitle || this.calculateResultTitle();
       return {
         name: this.profile?.name || '농부',
         title: this.levelMaxed ? '마늘쫑 장인 달성!' : this.completed ? `${MAX_STAGE}개 밭 완주!` : '오늘 수확 끝!',
         badge: this.levelMaxed ? 'WEMADE PLAY FARM CHALLENGE · MAX LEVEL' : 'WEMADE PLAY FARM CHALLENGE',
         score: formatCm(this.score),
+        playerTitle: badge.title,
+        titleDescription: badge.description,
         rank: summary.rank ? `${summary.rank}위` : '집계 중',
         total: summary.total ? `전체 ${summary.total}개 기록` : '랭킹 집계 중',
         level: this.levelMaxed ? 'MAX' : `Lv.${this.level}`,
@@ -702,6 +767,12 @@
       ctx.fillStyle = '#e07938';
       ctx.font = '950 90px sans-serif';
       ctx.fillText(data.score, 600, 325);
+      ctx.fillStyle = '#db7438';
+      ctx.font = '950 32px sans-serif';
+      ctx.fillText(`🏅 ${data.playerTitle}`, 600, 366);
+      ctx.fillStyle = '#667153';
+      ctx.font = '850 18px sans-serif';
+      this.wrapCanvasText(ctx, data.titleDescription, 600, 394, 720, 22, 1);
 
       const chips = [
         ['현재 내 순위', data.rank],
@@ -715,7 +786,7 @@
         const col = index % 3;
         const row = Math.floor(index / 3);
         const x = 236 + col * 244;
-        const y = 365 + row * 86;
+        const y = 414 + row * 72;
         this.roundedRectPath(ctx, x, y, 216, 64, 18);
         ctx.fillStyle = '#f4f0ce';
         ctx.fill();
@@ -729,10 +800,10 @@
 
       ctx.fillStyle = '#526246';
       ctx.font = '850 25px sans-serif';
-      ctx.fillText(`${data.name}님의 마늘쫑 수확 카드`, 600, 572);
+      ctx.fillText(`${data.name}님의 마늘쫑 수확 카드`, 600, 592);
       ctx.fillStyle = '#778163';
       ctx.font = '800 19px sans-serif';
-      this.wrapCanvasText(ctx, data.message, 600, 612, 760, 26, 2);
+      this.wrapCanvasText(ctx, data.message, 600, 632, 760, 26, 2);
       return canvas;
     }
     canvasToBlob(canvas) {
@@ -917,7 +988,7 @@
       this.sound.init();
       this.rng = new RNG(Date.now());
       this.state = 'playing'; this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES; this.runSaved = false; this.completed = false;
-      this.lastRunEntry = null; this.lastShareText = '';
+      this.lastRunEntry = null; this.lastShareText = ''; this.resultPlayerTitle = null;
       this.level = 1; this.levelXp = 0; this.levelMaxed = false; this.levelMaxTime = 0; this.runTime = 0; this.levelPulse = 0; this.maxLevelBanner = 0; this.challengeSurgeShown = false; this.friendMood = 'idle'; this.friendMoodTimer = 0;
       this.time = 0; this.particles.length = 0; this.transitionTimer = 0; this.stageBanner = 1.5; this.fieldClearTimer = 0; this.fieldClearStage = 0;
       this.input.power = 0; this.input.angle = 0; this.input.held = false;
@@ -1299,6 +1370,8 @@
       $('result-event-badge').textContent = this.levelMaxed ? 'WEMADE PLAY FARM CHALLENGE · MAX LEVEL' : 'WEMADE PLAY FARM CHALLENGE';
       $('result-goal').textContent = this.nextGoalText(isNewBest);
       $('result-eyebrow').textContent = `최고 기록 ${formatCm(this.best)}`;
+      this.resultPlayerTitle = this.calculateResultTitle();
+      this.renderResultPlayerTitle();
       $('result-share-button').textContent = '슬랙으로 내 성과 공유하기';
       this.renderResultRanking();
       $('result-card').classList.remove('hidden'); $('start-card').classList.add('hidden');
