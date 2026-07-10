@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 158">
+  <defs>
+    <linearGradient id="bodyMid" x1="44" y1="30" x2="154" y2="140" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f9efcd"/>
+      <stop offset=".58" stop-color="#dfc48b"/>
+      <stop offset="1" stop-color="#b78946"/>
+    </linearGradient>
+    <linearGradient id="wingMid" x1="14" y1="65" x2="178" y2="140" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#bed6cd"/>
+      <stop offset="1" stop-color="#f2dfa1"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="98" cy="143" rx="88" ry="14" fill="#466062" opacity=".2"/>
+  <ellipse cx="23" cy="137" rx="13" ry="10" fill="#d2a55a" opacity=".45"/>
+  <ellipse cx="169" cy="137" rx="13" ry="10" fill="#d2a55a" opacity=".45"/>
+  <rect x="14" y="72" width="42" height="63" rx="9" fill="url(#wingMid)" stroke="#b8954f" stroke-width="2"/>
+  <rect x="136" y="72" width="42" height="63" rx="9" fill="url(#wingMid)" stroke="#b8954f" stroke-width="2"/>
+  <rect x="38" y="32" width="116" height="103" rx="13" fill="url(#bodyMid)" stroke="#bd8739" stroke-width="3"/>
+  <path d="M30 32h132l-8 13H38z" fill="#e5aa42" stroke="#a97a35" stroke-width="2"/>
+  <path d="M56 24h80l12 10H44z" fill="#ffdf77" stroke="#b68135" stroke-width="2"/>
+  <g fill="#fff0a9" stroke="#c79232" stroke-width="1">
+    <rect x="28" y="86" width="12" height="10" rx="3"/>
+    <rect x="28" y="106" width="12" height="10" rx="3"/>
+    <rect x="152" y="86" width="12" height="10" rx="3"/>
+    <rect x="152" y="106" width="12" height="10" rx="3"/>
+    <rect x="55" y="52" width="14" height="10" rx="3"/>
+    <rect x="82" y="52" width="14" height="10" rx="3"/>
+    <rect x="109" y="52" width="14" height="10" rx="3"/>
+    <rect x="55" y="73" width="14" height="10" rx="3"/>
+    <rect x="82" y="73" width="14" height="10" rx="3"/>
+    <rect x="109" y="73" width="14" height="10" rx="3"/>
+    <rect x="55" y="94" width="14" height="10" rx="3"/>
+    <rect x="82" y="94" width="14" height="10" rx="3"/>
+    <rect x="109" y="94" width="14" height="10" rx="3"/>
+  </g>
+  <g fill="#f8f3df" stroke="#bd8739" stroke-width="1.5">
+    <rect x="58" y="116" width="10" height="19" rx="2"/>
+    <rect x="124" y="116" width="10" height="19" rx="2"/>
+  </g>
+  <path d="M78 135v-18c0-9 36-9 36 0v18z" fill="#ad3234"/>
+  <rect x="22" y="5" width="148" height="29" rx="13" fill="#fffbe7" stroke="#7a532f" stroke-width="3"/>
+  <circle cx="40" cy="20" r="5" fill="#f1c54f"/>
+  <circle cx="152" cy="20" r="5" fill="#66b95d"/>
+  <text x="96" y="25" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="900" fill="#315f38">WEMADE PLAY</text>
+</svg>

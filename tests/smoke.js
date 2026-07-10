@@ -39,6 +39,12 @@ global.requestAnimationFrame = () => 0;
 global.devicePixelRatio = 1;
 global.navigator = {};
 
+function pngSize(file) {
+  const buffer = fs.readFileSync(file);
+  assert.equal(buffer.toString('ascii', 1, 4), 'PNG', `${file} should be a PNG file`);
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
 const manifest = JSON.parse(fs.readFileSync('manifest.webmanifest', 'utf8'));
 assert.equal(manifest.display, 'standalone', 'PWA manifest should launch in standalone mode');
 assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512'), 'PWA manifest should include a 512px icon');
@@ -46,19 +52,49 @@ const html = fs.readFileSync('index.html', 'utf8');
 assert.ok(html.includes('WEMADE PLAY FARM CHALLENGE'), 'title/result screens should include the WEMADE PLAY challenge badge');
 assert.ok(html.includes('level-label') && html.includes('timer-label') && html.includes('xp-fill'), 'HUD should expose level, timer, and XP progress elements');
 assert.ok(html.includes('width="1280" height="720"'), 'canvas should default to a 16:9 landscape baseline');
+assert.ok(html.includes('result-ranking-summary'), 'result screen should show ranking without opening the ranking card');
+assert.ok(html.includes('result-share-button'), 'result screen should offer Slack sharing');
+assert.ok(!html.includes('🏆 랭킹 확인'), 'result screen should remove the old ranking check button');
 const css = fs.readFileSync('styles.css', 'utf8');
 assert.ok(css.includes('html, body, #game-shell'), 'root containers should share fixed full-frame sizing');
 assert.ok(css.includes('overflow: hidden'), 'page layout should prevent iframe scrollbars');
 assert.ok(css.includes('aspect-ratio: 16 / 9'), 'game shell should declare the 16:9 design basis');
 assert.equal(manifest.orientation, 'landscape-primary', 'PWA manifest should prefer landscape play');
+const visualResourceSizes = {
+  'assets/wemade-building.png': { width: 384, height: 316 },
+  'assets/wemade-building-mid.png': { width: 384, height: 316 },
+  'assets/wemade-building-final.png': { width: 384, height: 316 },
+  'assets/support-friend-idle.png': { width: 192, height: 216 },
+  'assets/support-friend-good.png': { width: 192, height: 216 },
+  'assets/support-friend-fail.png': { width: 192, height: 216 },
+  'assets/support-friend-max.png': { width: 192, height: 216 }
+};
+Object.entries(visualResourceSizes).forEach(([file, expectedSize]) => {
+  assert.ok(fs.existsSync(file), `${file} should exist as a replaceable visual resource`);
+  assert.deepEqual(pngSize(file), expectedSize, `${file} should match the 2x draw size`);
+});
 ['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png'].forEach((file) => {
   assert.ok(fs.existsSync(file), `${file} should exist for installable PWA icons`);
 });
 const serviceWorker = fs.readFileSync('sw.js', 'utf8');
 assert.ok(serviceWorker.includes('manifest.webmanifest'), 'service worker should cache the manifest');
 assert.ok(serviceWorker.includes('supabase-config.js'), 'service worker should cache runtime config for the app shell');
+assert.ok(serviceWorker.includes('assets/wemade-building.png'), 'service worker should cache replaceable building art');
+assert.ok(serviceWorker.includes('assets/wemade-building-mid.png'), 'service worker should cache the mid-stage building art');
+assert.ok(serviceWorker.includes('assets/wemade-building-final.png'), 'service worker should cache the final-stage building art');
+assert.ok(serviceWorker.includes('assets/support-friend-idle.png'), 'service worker should cache replaceable character art');
+assert.ok(serviceWorker.includes('assets/support-friend-good.png'), 'service worker should cache the success character art');
+assert.ok(serviceWorker.includes('assets/support-friend-fail.png'), 'service worker should cache the fail character art');
+assert.ok(serviceWorker.includes('assets/support-friend-max.png'), 'service worker should cache the max-level character art');
 
 const source = fs.readFileSync('game.js', 'utf8').replace('new Game();', 'globalThis.testGame = new Game();');
+assert.ok(source.includes('assets/wemade-building.png'), 'game should reference the replaceable building resource');
+assert.ok(source.includes('assets/wemade-building-mid.png'), 'game should reference the mid-stage building resource');
+assert.ok(source.includes('assets/wemade-building-final.png'), 'game should reference the final-stage building resource');
+assert.ok(source.includes('assets/support-friend-idle.png'), 'game should reference the replaceable character resource');
+assert.ok(source.includes('assets/support-friend-good.png'), 'game should reference the success character resource');
+assert.ok(source.includes('assets/support-friend-fail.png'), 'game should reference the fail character resource');
+assert.ok(source.includes('assets/support-friend-max.png'), 'game should reference the max-level character resource');
 vm.runInThisContext(source, { filename: 'game.js' });
 
 const game = global.testGame;
@@ -133,6 +169,12 @@ game.gameOver();
 assert.ok(elements.get('result-stats').innerHTML.includes('도달 레벨'), 'result screen should summarize reached level');
 assert.ok(elements.get('result-stats').innerHTML.includes('챌린지 시간'), 'result screen should summarize challenge time');
 assert.ok(elements.get('result-goal').textContent.includes('다음 목표'), 'result screen should offer a replay goal');
+assert.ok(elements.get('result-ranking-summary').innerHTML.includes('현재 내 순위'), 'result screen should calculate my ranking immediately');
+assert.equal(elements.get('result-share-button').textContent, '슬랙으로 내 성과 공유하기', 'result screen should replace ranking check with Slack sharing');
+const shareText = game.buildShareText();
+assert.ok(shareText.includes('마늘쫑 뽑기 완료') && shareText.includes('테스트농부') && shareText.includes('현재 순위'), 'Slack share message should summarize this result');
+assert.ok(source.includes('ClipboardItem') && source.includes('image/png'), 'Slack sharing should copy the result card as a PNG image when supported');
+assert.ok(source.includes('이미지 복사가 막혀 성과 문구를 복사했어요'), 'Slack sharing should fall back to text when image clipboard is unavailable');
 const ranking = JSON.parse(localStorage.getItem('garlic-world-cache'));
 assert.equal(ranking[0].name, '테스트농부', 'ranking should use the active nickname');
 assert.ok(ranking[0].cm > 0, 'ranking should save harvested centimeters');
@@ -149,7 +191,7 @@ for (let i = 0; i < 60 * 60 && !game.completed && game.state === 'playing'; i++)
   simulatedSeconds += 1 / 60;
 }
 assert.equal(game.completed, true, 'skillful play should clear all 3 fields inside the 60-second challenge');
-assert.equal(game.harvested, 12, 'clearing all 3 fields should harvest 12 scapes');
+assert.equal(game.harvested, 9, 'clearing all 3 fields should harvest 9 scapes');
 assert.ok(game.runTime <= 60, `all 3 fields should clear within 60 seconds, got ${game.runTime}`);
 assert.equal(game.levelMaxed, true, 'skillful play should reach max level inside the 60-second challenge');
 assert.ok(game.levelMaxTime <= 60, `max level should be reached within 60 seconds, got ${game.levelMaxTime}`);

@@ -4,20 +4,34 @@
   const $ = (id) => document.getElementById(id);
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
   const lerp = (a, b, t) => a + (b - a) * t;
+  const mixRgb = (t, from, to) => `rgb(${Math.round(lerp(from[0], to[0], t))}, ${Math.round(lerp(from[1], to[1], t))}, ${Math.round(lerp(from[2], to[2], t))})`;
   const easeOut = (t) => 1 - Math.pow(1 - clamp(t), 3);
   const START_LIVES = 5;
   const MAX_LIVES = 5;
-  const PLANTS_PER_STAGE = 4;
+  const PLANTS_PER_STAGE = 3;
   const MAX_STAGE = 3;
   const MAX_LEVEL = 10;
   const CHALLENGE_SECONDS = 60;
-  const LEVEL_THRESHOLDS = [0, 120, 260, 440, 650, 900, 1180, 1500, 1860, 2250];
+  const LEVEL_THRESHOLDS = [0, 90, 195, 330, 490, 675, 885, 1125, 1395, 1690];
   const RELEASE_HARVEST_MIN = .68;
   const AUTO_HARVEST_PROGRESS = 1;
   const FIELD_CLEAR_DURATION = 2.2;
   const SUCCESS_ADVANCE_DELAY = .68;
   const FAIL_ADVANCE_DELAY = 1.05;
   const CHALLENGE_PULL_SPEED = 1.5;
+  const VISUAL_ASSET_PATHS = {
+    building: [
+      'assets/wemade-building.png',
+      'assets/wemade-building-mid.png',
+      'assets/wemade-building-final.png'
+    ],
+    friend: {
+      idle: 'assets/support-friend-idle.png',
+      good: 'assets/support-friend-good.png',
+      fail: 'assets/support-friend-fail.png',
+      max: 'assets/support-friend-max.png'
+    }
+  };
   const FIRST_PLAY_LESSONS = [
     null,
     { title: '첫 줄기는 손맛부터', short: '잡고 위로 쭉!', copy: '손 아이콘처럼 위로 당겨보세요. 초록 구간이 넓어서 거의 바로 쑤욱 뽑혀요.' },
@@ -93,6 +107,35 @@
     }
   }
 
+  class VisualAssets {
+    constructor(paths) {
+      this.paths = paths;
+      this.images = {};
+      if (typeof Image !== 'function') return;
+      this.images.building = paths.building.map((src) => this.load(src));
+      this.images.friend = {};
+      Object.entries(paths.friend).forEach(([key, src]) => { this.images.friend[key] = this.load(src); });
+    }
+    load(src) {
+      const image = new Image();
+      image.decoding = 'async';
+      image.src = src;
+      return image;
+    }
+    ready(image) {
+      return Boolean(image && image.complete && image.naturalWidth > 0);
+    }
+    building(growth = 0) {
+      const list = this.images.building || [];
+      if (!list.length) return null;
+      const index = Math.min(list.length - 1, Math.floor(clamp(growth, 0, .999) * list.length));
+      return list[index] || list[0];
+    }
+    friend(mood) {
+      return this.images.friend?.[mood] || this.images.friend?.idle;
+    }
+  }
+
   class Particle {
     constructor(x, y, options, rng) {
       this.x = x; this.y = y;
@@ -159,7 +202,8 @@
       this.seed = rng.range(0, 100);
       this.difficulty = clamp((stage - 1) / Math.max(1, MAX_STAGE - 1), 0, .82);
       this.assist = this.lesson === 1 ? .92 : this.lesson === 2 ? .62 : this.lesson === 3 ? .42 : clamp(.24 - (stage - 1) * .075 - index * .025, 0, .24);
-      if (!this.lesson && stage === 1) this.assist = Math.max(this.assist, .28);
+      const globalIndex = (stage - 1) * PLANTS_PER_STAGE + index;
+      if (!this.lesson && globalIndex === 3) this.assist = Math.max(this.assist, .28);
       this.baseForce = rng.range(.39, .53) + this.difficulty * .08;
       this.band = Math.max(.105, rng.range(.155, .205) - this.difficulty * .07);
       this.danger = clamp(this.baseForce + this.band + rng.range(.14, .2), .72, .9);
@@ -308,11 +352,14 @@
       this.canvas = $('game');
       this.ctx = this.canvas.getContext('2d');
       this.sound = new Sound();
+      this.visualAssets = new VisualAssets(VISUAL_ASSET_PATHS);
       this.rng = new RNG();
       this.profile = this.readStored('garlic-profile', null) || { name: '농부' };
       this.worldRanking = new SupabaseRanking(globalThis.GARLIC_WORLD_RANKING || globalThis.window?.GARLIC_WORLD_RANKING || {});
       this.rankings = this.readStored('garlic-world-cache', this.readStored('garlic-rankings', []));
       this.rankingStatus = this.worldRanking.enabled ? '월드 랭킹을 불러오는 중…' : 'Supabase 연결 대기 중';
+      this.lastRunEntry = null;
+      this.lastShareText = '';
       this.installPrompt = null;
       this.state = this.profile ? 'title' : 'login';
       this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES;
@@ -495,14 +542,279 @@
         return `<div class="rank-row${mine}"><span class="rank-pos">${medals[index] || index + 1}</span><span class="rank-name">${escape(row.name)}<small>밭 ${row.stage} · ${row.harvested || 0}줄기 · 완벽 ${row.perfectCount || 0} · ${date}</small></span><strong class="rank-score">${formatCm(scoreValue(row))}</strong></div>`;
       }).join('');
     }
+    escapeHtml(value) {
+      return String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;' }[c]));
+    }
+    sameRankingEntry(row, entry) {
+      if (!row || !entry) return false;
+      return String(row.name || '') === String(entry.name || '')
+        && Math.abs(scoreValue(row) - scoreValue(entry)) < .05
+        && Number(row.harvested || 0) === Number(entry.harvested || 0)
+        && Number(row.combo || 0) === Number(entry.combo || 0)
+        && Number(row.perfectCount || 0) === Number(entry.perfectCount || 0);
+    }
+    resultRankingRows() {
+      const entry = this.lastRunEntry;
+      const rows = Array.isArray(this.rankings) ? [...this.rankings] : [];
+      if (entry && !rows.some((row) => this.sameRankingEntry(row, entry))) rows.push(entry);
+      return rows.sort((a, b) => scoreValue(b) - scoreValue(a) || b.time - a.time);
+    }
+    currentResultRank() {
+      const entry = this.lastRunEntry;
+      if (!entry || scoreValue(entry) <= 0) return { entry: null, rows: [], rank: 0, total: 0, ahead: null, behind: null };
+      const rows = this.resultRankingRows();
+      const index = rows.findIndex((row) => this.sameRankingEntry(row, entry));
+      return {
+        entry,
+        rows,
+        rank: index >= 0 ? index + 1 : 0,
+        total: rows.length,
+        ahead: index > 0 ? rows[index - 1] : null,
+        behind: index >= 0 && index < rows.length - 1 ? rows[index + 1] : null
+      };
+    }
+    renderResultRanking() {
+      const box = $('result-ranking-summary');
+      if (!box) return;
+      const summary = this.currentResultRank();
+      if (!summary.entry) {
+        box.textContent = this.score > 0 ? (this.rankingStatus || '랭킹을 불러오는 중...') : '아직 랭킹 정보가 없습니다.';
+        return;
+      }
+      const rankText = summary.rank ? `${summary.rank}위` : '계산 중';
+      const totalText = summary.total ? `${summary.total}개 기록 기준` : '집계 중';
+      const nearby = [];
+      if (summary.ahead) nearby.push(`앞순위 ${summary.rank - 1}위 ${this.escapeHtml(summary.ahead.name)} ${formatCm(scoreValue(summary.ahead))}`);
+      if (summary.behind) nearby.push(`다음 ${summary.rank + 1}위 ${this.escapeHtml(summary.behind.name)} ${formatCm(scoreValue(summary.behind))}`);
+      const note = [this.rankingStatus || '랭킹 정보 계산 완료', nearby.join(' · ')].filter(Boolean).join(' · ');
+      box.innerHTML = [
+        '<div class="result-rank-grid">',
+        `<span>현재 내 순위<strong>${rankText}</strong></span>`,
+        `<span>내 기록<strong>${formatCm(scoreValue(summary.entry))}</strong></span>`,
+        `<span>랭킹 기준<strong>${totalText}</strong></span>`,
+        '</div>',
+        `<div class="result-rank-note">${this.escapeHtml(note)}</div>`
+      ].join('');
+    }
+    resultRankText() {
+      const summary = this.currentResultRank();
+      return summary.rank ? `현재 순위는 ${summary.rank}위` : '현재 순위는 집계 중';
+    }
+    buildShareText() {
+      const name = this.profile?.name || '농부';
+      const time = this.levelMaxed ? formatTime(this.levelMaxTime) : formatTime(this.runTime);
+      return `🎮 마늘쫑 뽑기 완료! ${name}님의 수확 기록은 ${formatCm(this.score)}, ${this.resultRankText()}입니다! Lv.${this.level}/${MAX_LEVEL} · ${time} · 완벽 ${this.perfectCount}줄 · 최대 콤보 x${this.maxCombo}`;
+    }
+    shareCardData() {
+      const summary = this.currentResultRank();
+      return {
+        name: this.profile?.name || '농부',
+        title: this.levelMaxed ? '마늘쫑 장인 달성!' : this.completed ? `${MAX_STAGE}개 밭 완주!` : '오늘 수확 끝!',
+        badge: this.levelMaxed ? 'WEMADE PLAY FARM CHALLENGE · MAX LEVEL' : 'WEMADE PLAY FARM CHALLENGE',
+        score: formatCm(this.score),
+        rank: summary.rank ? `${summary.rank}위` : '집계 중',
+        total: summary.total ? `전체 ${summary.total}개 기록` : '랭킹 집계 중',
+        level: this.levelMaxed ? 'MAX' : `Lv.${this.level}`,
+        time: this.levelMaxed ? formatTime(this.levelMaxTime) : formatTime(this.runTime),
+        perfect: `${this.perfectCount}줄`,
+        combo: `x${this.maxCombo}`,
+        harvested: `${this.harvested}줄`,
+        message: this.buildShareText()
+      };
+    }
+    roundedRectPath(ctx, x, y, w, h, r) {
+      const radius = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, y + h - radius);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+      ctx.lineTo(x + radius, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+    wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
+      const words = String(text).split(' ');
+      const lines = [];
+      let line = '';
+      words.forEach((word) => {
+        const next = line ? `${line} ${word}` : word;
+        if (ctx.measureText(next).width <= maxWidth || !line) line = next;
+        else { lines.push(line); line = word; }
+      });
+      if (line) lines.push(line);
+      lines.slice(0, maxLines).forEach((value, index) => ctx.fillText(value, x, y + index * lineHeight));
+      return Math.min(lines.length, maxLines) * lineHeight;
+    }
+    buildResultCardCanvas() {
+      const doc = globalThis.document;
+      if (!doc?.createElement) return null;
+      const data = this.shareCardData();
+      const canvas = doc.createElement('canvas');
+      canvas.width = 1200;
+      canvas.height = 720;
+      const ctx = canvas.getContext?.('2d');
+      if (!ctx) return null;
+
+      const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      bg.addColorStop(0, '#d9f0c9');
+      bg.addColorStop(.54, '#f4e6ad');
+      bg.addColorStop(1, '#9a7545');
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.globalAlpha = .28;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(1020, 116, 72, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7fb56b';
+      ctx.beginPath(); ctx.ellipse(210, 585, 240, 42, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(955, 590, 230, 40, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(70, 55, 32, .25)';
+      ctx.shadowBlur = 30;
+      ctx.shadowOffsetY = 14;
+      this.roundedRectPath(ctx, 170, 70, 860, 580, 34);
+      ctx.fillStyle = '#fffdf0';
+      ctx.fill();
+      ctx.restore();
+      this.roundedRectPath(ctx, 170, 70, 860, 580, 34);
+      ctx.strokeStyle = '#8b6b39';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#315f38';
+      ctx.font = '900 27px sans-serif';
+      this.roundedRectPath(ctx, 378, 106, 444, 44, 22);
+      ctx.fillStyle = '#edf3c8';
+      ctx.fill();
+      ctx.fillStyle = '#315f38';
+      ctx.fillText(data.badge, 600, 136);
+
+      ctx.fillStyle = '#34492f';
+      ctx.font = '950 58px sans-serif';
+      ctx.fillText(data.title, 600, 220);
+      ctx.fillStyle = '#e07938';
+      ctx.font = '950 90px sans-serif';
+      ctx.fillText(data.score, 600, 325);
+
+      const chips = [
+        ['현재 내 순위', data.rank],
+        ['랭킹 기준', data.total],
+        ['도달 레벨', data.level],
+        ['챌린지 시간', data.time],
+        ['완벽 수확', data.perfect],
+        ['최대 콤보', data.combo]
+      ];
+      chips.forEach(([label, value], index) => {
+        const col = index % 3;
+        const row = Math.floor(index / 3);
+        const x = 236 + col * 244;
+        const y = 365 + row * 86;
+        this.roundedRectPath(ctx, x, y, 216, 64, 18);
+        ctx.fillStyle = '#f4f0ce';
+        ctx.fill();
+        ctx.fillStyle = '#667153';
+        ctx.font = '900 19px sans-serif';
+        ctx.fillText(label, x + 108, y + 24);
+        ctx.fillStyle = '#db7438';
+        ctx.font = '950 27px sans-serif';
+        ctx.fillText(value, x + 108, y + 53);
+      });
+
+      ctx.fillStyle = '#526246';
+      ctx.font = '850 25px sans-serif';
+      ctx.fillText(`${data.name}님의 마늘쫑 수확 카드`, 600, 572);
+      ctx.fillStyle = '#778163';
+      ctx.font = '800 19px sans-serif';
+      this.wrapCanvasText(ctx, data.message, 600, 612, 760, 26, 2);
+      return canvas;
+    }
+    canvasToBlob(canvas) {
+      return new Promise((resolve) => canvas.toBlob ? canvas.toBlob(resolve, 'image/png') : resolve(null));
+    }
+    async copyResultCardImage() {
+      const nav = globalThis.navigator;
+      const ClipboardItemCtor = globalThis.ClipboardItem;
+      if (!nav?.clipboard?.write || typeof ClipboardItemCtor !== 'function') return false;
+      const canvas = this.buildResultCardCanvas();
+      if (!canvas) return false;
+      const blob = await this.canvasToBlob(canvas);
+      if (!blob) return false;
+      await nav.clipboard.write([new ClipboardItemCtor({ 'image/png': blob })]);
+      return true;
+    }
+    async copyShareText(text) {
+      const nav = globalThis.navigator;
+      if (nav?.clipboard?.writeText) {
+        await nav.clipboard.writeText(text);
+        return true;
+      }
+      const doc = globalThis.document;
+      if (!doc?.createElement || !doc?.body) return false;
+      const textarea = doc.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      doc.body.appendChild(textarea);
+      textarea.select();
+      let copied = false;
+      try { copied = Boolean(doc.execCommand?.('copy')); }
+      finally { doc.body.removeChild(textarea); }
+      return copied;
+    }
+    async shareResultToSlack() {
+      const text = this.buildShareText();
+      this.lastShareText = text;
+      const button = $('result-share-button');
+      const originalLabel = button?.textContent || '슬랙으로 내 성과 공유하기';
+      // 슬랙 웹훅/토큰 같은 민감 정보는 코드에 저장하지 않고, 결과 카드 PNG를 클립보드에 복사해 Slack에 붙여넣게 합니다.
+      try {
+        const copiedImage = await this.copyResultCardImage();
+        if (copiedImage) {
+          if (button) {
+            button.textContent = '✅ 결과 카드 복사 완료';
+            setTimeout(() => { button.textContent = originalLabel; }, 1700);
+          }
+          this.toast('결과 카드가 복사됐어요. Slack에 붙여넣으세요!', 'good');
+          return;
+        }
+        const copied = await this.copyShareText(text);
+        if (copied) {
+          if (button) {
+            button.textContent = '✅ 공유 문구 복사 완료';
+            setTimeout(() => { button.textContent = originalLabel; }, 1600);
+          }
+          this.toast('이미지 복사가 막혀 성과 문구를 복사했어요', 'good');
+        } else {
+          this.toast('공유 문구를 만들었어요. 브라우저 복사가 막혀 있어요', '');
+        }
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        try {
+          const copied = await this.copyShareText(text);
+          this.toast(copied ? '슬랙에 붙여넣을 성과 문구를 복사했어요' : '공유 문구를 만들었어요. 브라우저 복사가 막혀 있어요', copied ? 'good' : '');
+        } catch {
+          this.toast('공유 문구를 만들었지만 복사 권한이 막혀 있어요', '');
+        }
+      }
+    }
     async refreshWorldRanking() {
       if (!this.worldRanking.enabled) {
         this.rankingStatus = 'Supabase URL과 anon public key를 넣으면 월드 랭킹으로 전환됩니다.';
         if (this.state === 'ranking') this.renderRanking();
+        if (this.state === 'gameover') this.renderResultRanking();
         return;
       }
       this.rankingStatus = '월드 랭킹을 불러오는 중…';
       if (this.state === 'ranking') this.renderRanking();
+      if (this.state === 'gameover') this.renderResultRanking();
       const result = await this.worldRanking.fetchTop();
       if (result.ok) {
         this.rankings = result.rows;
@@ -512,6 +824,7 @@
         this.rankingStatus = `월드 랭킹 연결 실패 · ${result.error}`;
       }
       if (this.state === 'ranking') this.renderRanking();
+      if (this.state === 'gameover') this.renderResultRanking();
     }
     saveRunToRanking() {
       if (this.runSaved || !this.profile || this.score <= 0) return;
@@ -525,18 +838,23 @@
         perfectCount: this.perfectCount,
         time: Date.now()
       };
+      this.lastRunEntry = entry;
       this.rankings.push(entry);
       this.rankings = this.rankings.sort((a, b) => scoreValue(b) - scoreValue(a) || b.time - a.time).slice(0, 50);
       localStorage.setItem('garlic-world-cache', JSON.stringify(this.rankings));
+      this.renderResultRanking();
       if (!this.worldRanking.enabled) {
         this.rankingStatus = 'Supabase 설정 전이라 이 기록은 임시로 이 기기에만 보관됐어요.';
+        this.renderResultRanking();
         return;
       }
       this.rankingStatus = '월드 랭킹에 기록을 올리는 중…';
-      this.worldRanking.submit(entry).then((result) => {
+      this.renderResultRanking();
+      this.worldRanking.submit(entry).then(async (result) => {
         this.rankingStatus = result.ok ? '월드 랭킹에 기록이 올라갔어요.' : `월드 랭킹 저장 실패 · ${result.error}`;
-        if (result.ok) this.refreshWorldRanking();
+        if (result.ok) await this.refreshWorldRanking();
         else if (this.state === 'ranking') this.renderRanking();
+        this.renderResultRanking();
       });
     }
     bind() {
@@ -547,7 +865,7 @@
       $('retry-button').addEventListener('click', () => this.start());
       $('ranking-button').addEventListener('click', () => this.showRanking('title'));
       $('install-button').addEventListener('click', () => this.installApp());
-      $('result-ranking-button').addEventListener('click', () => this.showRanking('gameover'));
+      $('result-share-button').addEventListener('click', () => this.shareResultToSlack());
       $('ranking-back-button').addEventListener('click', () => this.closeRanking());
       $('change-name-button').addEventListener('click', () => this.showLogin());
       $('skip-tutorial').addEventListener('click', () => this.finishTutorial());
@@ -599,6 +917,7 @@
       this.sound.init();
       this.rng = new RNG(Date.now());
       this.state = 'playing'; this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES; this.runSaved = false; this.completed = false;
+      this.lastRunEntry = null; this.lastShareText = '';
       this.level = 1; this.levelXp = 0; this.levelMaxed = false; this.levelMaxTime = 0; this.runTime = 0; this.levelPulse = 0; this.maxLevelBanner = 0; this.challengeSurgeShown = false; this.friendMood = 'idle'; this.friendMoodTimer = 0;
       this.time = 0; this.particles.length = 0; this.transitionTimer = 0; this.stageBanner = 1.5; this.fieldClearTimer = 0; this.fieldClearStage = 0;
       this.input.power = 0; this.input.angle = 0; this.input.held = false;
@@ -980,6 +1299,8 @@
       $('result-event-badge').textContent = this.levelMaxed ? 'WEMADE PLAY FARM CHALLENGE · MAX LEVEL' : 'WEMADE PLAY FARM CHALLENGE';
       $('result-goal').textContent = this.nextGoalText(isNewBest);
       $('result-eyebrow').textContent = `최고 기록 ${formatCm(this.best)}`;
+      $('result-share-button').textContent = '슬랙으로 내 성과 공유하기';
+      this.renderResultRanking();
       $('result-card').classList.remove('hidden'); $('start-card').classList.add('hidden');
       $('overlay').classList.add('visible'); $('meter-panel').classList.add('hidden-panel');
     }
@@ -1058,11 +1379,11 @@
       }
       this.cloud(ctx, w * .18 + Math.sin(this.time * .07) * 20, h * .18, Math.min(1, w / 700), theme.cloud);
       this.cloud(ctx, w * .64 + Math.sin(this.time * .05 + 2) * 14, h * .28, .65, theme.cloud);
-      this.drawWemadePlayCampus(ctx, theme, ground);
       ctx.fillStyle = theme.hillA;
       ctx.beginPath(); ctx.moveTo(0, ground); ctx.quadraticCurveTo(w * .2, ground - 115, w * .44, ground); ctx.quadraticCurveTo(w * .72, ground - 145, w, ground - 15); ctx.lineTo(w, ground); ctx.fill();
       ctx.fillStyle = theme.hillB;
       ctx.beginPath(); ctx.moveTo(0, ground); ctx.quadraticCurveTo(w * .3, ground - 68, w * .55, ground); ctx.quadraticCurveTo(w * .78, ground - 90, w, ground - 35); ctx.lineTo(w, ground); ctx.fill();
+      this.drawWemadePlayCampus(ctx, theme, ground);
       this.drawStageProps(ctx, theme, ground);
       // Distant crops
       for (let i = 0; i < 11; i++) {
@@ -1081,25 +1402,73 @@
     }
     drawWemadePlayCampus(ctx, theme, ground) {
       const w = this.w, h = this.h;
-      const scale = clamp(w / 820, .62, 1);
-      const x = w * .76, y = ground - 124 * scale;
+      const totalPlants = PLANTS_PER_STAGE * MAX_STAGE;
+      const growth = clamp((this.harvested || 0) / totalPlants, 0, 1);
+      const baseScale = clamp(w / 820, .62, 1);
+      const scale = baseScale * lerp(.72, 1.28, growth);
+      const hillSeat = Math.min(74, h * .095);
+      const x = Math.min(w - 104 * scale, w * .86);
+      const y = ground - hillSeat - 136 * scale;
+      const columns = clamp((growth - .3) / .3, 0, 1);
+      const grandeur = clamp((growth - .55) / .3, 0, 1);
+      const opulence = clamp((growth - .8) / .2, 0, 1);
       ctx.save();
-      ctx.globalAlpha = w < 520 ? .54 : .72;
+      ctx.globalAlpha = lerp(w < 520 ? .48 : .66, w < 520 ? .82 : 1, growth);
       ctx.translate(x, y);
       ctx.scale(scale, scale);
 
       ctx.fillStyle = 'rgba(70, 96, 98, .18)';
       ctx.beginPath(); ctx.ellipse(8, 118, 118, 16, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = 'rgba(82, 111, 112, .62)';
-      ctx.strokeStyle = 'rgba(255, 250, 220, .42)';
-      ctx.lineWidth = 2;
+
+      const buildingImage = this.visualAssets.building(growth);
+      if (this.visualAssets.ready(buildingImage)) {
+        ctx.drawImage(buildingImage, -96, -22, 192, 158);
+        ctx.restore();
+        return;
+      }
+
+      if (grandeur > 0) {
+        ctx.fillStyle = `rgba(${Math.round(lerp(60, 210, grandeur))}, ${Math.round(lerp(70, 165, grandeur))}, ${Math.round(lerp(70, 90, grandeur))}, ${lerp(0, .45, grandeur)})`;
+        ctx.beginPath(); ctx.ellipse(-84, 112, 12, lerp(2, 12, grandeur), 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(84, 112, 12, lerp(2, 12, grandeur), 0, 0, Math.PI * 2); ctx.fill();
+      }
+
+      ctx.fillStyle = mixRgb(growth, [82, 111, 112], [231, 217, 189]);
+      ctx.strokeStyle = mixRgb(growth, [255, 250, 220], [201, 158, 74]);
+      ctx.lineWidth = lerp(2, 3, growth);
       ctx.beginPath(); ctx.roundRect(-58, 20, 116, 96, 10); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(255, 241, 170, .8)';
+
+      if (grandeur > 0) {
+        ctx.fillStyle = mixRgb(grandeur, [190, 190, 190], [225, 176, 74]);
+        ctx.beginPath(); ctx.roundRect(-64, 14 - grandeur * 4, 128, 8, 4); ctx.fill();
+      }
+
+      const litWindows = Math.round(lerp(2, 12, growth));
+      let windowIndex = 0;
       for (let row = 0; row < 3; row++) {
         for (let col = 0; col < 4; col++) {
+          const lit = windowIndex++ < litWindows;
+          ctx.fillStyle = lit ? mixRgb(growth, [255, 241, 170], [255, 214, 120]) : 'rgba(150, 170, 172, .4)';
           ctx.beginPath(); ctx.roundRect(-42 + col * 27, 36 + row * 20, 14, 10, 3); ctx.fill();
+          if (lit && grandeur > .5) { ctx.strokeStyle = 'rgba(201, 158, 74, .6)'; ctx.lineWidth = 1; ctx.stroke(); }
         }
       }
+
+      if (columns > 0) {
+        ctx.fillStyle = mixRgb(columns, [140, 148, 150], [246, 240, 224]);
+        ctx.strokeStyle = mixRgb(columns, [110, 118, 120], [201, 158, 74]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.roundRect(-34, 92, 8, 24, 2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.roundRect(26, 92, 8, 24, 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = opulence > 0 ? mixRgb(opulence, [140, 51, 46], [156, 38, 42]) : 'rgba(90, 70, 60, .5)';
+        ctx.beginPath(); ctx.roundRect(-16, 98, 32, 18, [8, 8, 0, 0]); ctx.fill();
+      }
+
+      if (opulence > 0) {
+        ctx.fillStyle = `rgba(178, 58, 58, ${lerp(0, .85, opulence)})`;
+        ctx.beginPath(); ctx.moveTo(-9, 116); ctx.lineTo(9, 116); ctx.lineTo(15, 133); ctx.lineTo(-15, 133); ctx.fill();
+      }
+
       ctx.fillStyle = 'rgba(255, 249, 218, .94)';
       ctx.strokeStyle = theme.sign;
       ctx.lineWidth = 2.5;
@@ -1112,6 +1481,19 @@
       ctx.beginPath(); ctx.arc(-52, 13, 5, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#66b95d';
       ctx.beginPath(); ctx.arc(52, 13, 5, 0, Math.PI * 2); ctx.fill();
+
+      if (grandeur > 0) {
+        ctx.fillStyle = `rgba(225, 184, 74, ${lerp(0, 1, grandeur)})`;
+        ctx.beginPath(); ctx.arc(-70, -2, lerp(0, 4.5, grandeur), 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(70, -2, lerp(0, 4.5, grandeur), 0, Math.PI * 2); ctx.fill();
+      }
+
+      if (growth >= 1) {
+        ctx.strokeStyle = '#8a6a2e'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(0, -34); ctx.stroke();
+        ctx.fillStyle = '#f1c54f';
+        ctx.beginPath(); ctx.moveTo(0, -34); ctx.lineTo(22, -27); ctx.lineTo(0, -20); ctx.fill();
+      }
       ctx.restore();
     }
     drawStageProps(ctx, theme, ground) {
@@ -1600,7 +1982,7 @@
       ctx.strokeText(`밭 ${this.fieldClearStage} 클리어!`, 0, -8);
       ctx.fillText(`밭 ${this.fieldClearStage} 클리어!`, 0, -8);
       ctx.fillStyle = '#42633b'; ctx.font = '900 14px sans-serif';
-      ctx.fillText(`다음 밭 ${this.stage}/${MAX_STAGE} · 마늘쫑 4줄기 준비`, 0, 29);
+      ctx.fillText(`다음 밭 ${this.stage}/${MAX_STAGE} · 마늘쫑 ${PLANTS_PER_STAGE}줄기 준비`, 0, 29);
 
       for (let i = 0; i < MAX_STAGE; i++) {
         const x = (i - (MAX_STAGE - 1) / 2) * 28;
@@ -1646,31 +2028,39 @@
       ctx.fillStyle = 'rgba(45,32,20,.22)';
       ctx.beginPath(); ctx.ellipse(0, 43, 58, 12, 0, 0, Math.PI * 2); ctx.fill();
 
-      ctx.save();
-      ctx.rotate(Math.sin(this.time * 5) * .045);
-      ctx.fillStyle = '#f5c45d';
-      ctx.strokeStyle = '#6b4e31';
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.ellipse(0, 3, 38, 42, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ffe79a';
-      ctx.beginPath(); ctx.ellipse(0, 13, 25, 24, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#f5c45d';
-      ctx.strokeStyle = '#6b4e31';
-      ctx.beginPath(); ctx.ellipse(-25, -29, 13, 18, -.55, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.ellipse(25, -29, 13, 18, .55, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#3a3429';
-      const eyeY = mood === 'fail' ? -4 : -7;
-      if (mood === 'max') {
-        ctx.font = '900 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('✦', -13, eyeY); ctx.fillText('✦', 13, eyeY);
+      const friendImage = this.visualAssets.friend(mood);
+      if (this.visualAssets.ready(friendImage)) {
+        ctx.save();
+        ctx.rotate(Math.sin(this.time * 5) * .045);
+        ctx.drawImage(friendImage, -48, -56, 96, 108);
+        ctx.restore();
       } else {
-        ctx.beginPath(); ctx.arc(-13, eyeY, 3.8, 0, Math.PI * 2); ctx.arc(13, eyeY, 3.8, 0, Math.PI * 2); ctx.fill();
+        ctx.save();
+        ctx.rotate(Math.sin(this.time * 5) * .045);
+        ctx.fillStyle = '#f5c45d';
+        ctx.strokeStyle = '#6b4e31';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.ellipse(0, 3, 38, 42, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#ffe79a';
+        ctx.beginPath(); ctx.ellipse(0, 13, 25, 24, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#f5c45d';
+        ctx.strokeStyle = '#6b4e31';
+        ctx.beginPath(); ctx.ellipse(-25, -29, 13, 18, -.55, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(25, -29, 13, 18, .55, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#3a3429';
+        const eyeY = mood === 'fail' ? -4 : -7;
+        if (mood === 'max') {
+          ctx.font = '900 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('✦', -13, eyeY); ctx.fillText('✦', 13, eyeY);
+        } else {
+          ctx.beginPath(); ctx.arc(-13, eyeY, 3.8, 0, Math.PI * 2); ctx.arc(13, eyeY, 3.8, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.strokeStyle = '#3a3429'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+        ctx.beginPath();
+        if (mood === 'fail') ctx.arc(0, 16, 8, Math.PI * 1.08, Math.PI * 1.92);
+        else ctx.arc(0, 8, 10, .15, Math.PI - .15);
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.strokeStyle = '#3a3429'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
-      ctx.beginPath();
-      if (mood === 'fail') ctx.arc(0, 16, 8, Math.PI * 1.08, Math.PI * 1.92);
-      else ctx.arc(0, 8, 10, .15, Math.PI - .15);
-      ctx.stroke();
-      ctx.restore();
 
       ctx.strokeStyle = '#6b4e31'; ctx.lineWidth = 3; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(28, -2); ctx.lineTo(58, -29); ctx.stroke();

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'garlicdone-pwa-v3';
+const CACHE_NAME = 'garlicdone-pwa-v8';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -6,6 +6,13 @@ const CORE_ASSETS = [
   './game.js',
   './supabase-config.js',
   './manifest.webmanifest',
+  './assets/wemade-building.png',
+  './assets/wemade-building-mid.png',
+  './assets/wemade-building-final.png',
+  './assets/support-friend-idle.png',
+  './assets/support-friend-good.png',
+  './assets/support-friend-fail.png',
+  './assets/support-friend-max.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/maskable-192.png',
