@@ -57,6 +57,7 @@ assert.ok(html.includes('result-player-title'), 'result screen should show a fun
 assert.ok(html.includes('result-share-button'), 'result screen should offer Slack sharing');
 assert.ok(!html.includes('🏆 랭킹 확인'), 'result screen should remove the old ranking check button');
 assert.ok(html.includes('● ●') && html.includes('1 / 3'), 'initial HUD should reflect 2 lives and 3 scapes per field');
+assert.ok(html.includes('game.js?v=20260710-v10') && html.includes('styles.css?v=20260710-v10'), 'HTML should version app shell assets to avoid stale service-worker caches');
 const css = fs.readFileSync('styles.css', 'utf8');
 assert.ok(css.includes('html, body, #game-shell'), 'root containers should share fixed full-frame sizing');
 assert.ok(css.includes('overflow: hidden'), 'page layout should prevent iframe scrollbars');
@@ -79,8 +80,10 @@ Object.entries(visualResourceSizes).forEach(([file, expectedSize]) => {
   assert.ok(fs.existsSync(file), `${file} should exist for installable PWA icons`);
 });
 const serviceWorker = fs.readFileSync('sw.js', 'utf8');
+assert.ok(serviceWorker.includes('garlicdone-pwa-v10'), 'service worker cache should be bumped for the latest deploy');
 assert.ok(serviceWorker.includes('manifest.webmanifest'), 'service worker should cache the manifest');
 assert.ok(serviceWorker.includes('supabase-config.js'), 'service worker should cache runtime config for the app shell');
+assert.ok(serviceWorker.indexOf('fetch(request)') < serviceWorker.indexOf('caches.match(request)'), 'service worker should prefer network before cached app assets');
 assert.ok(serviceWorker.includes('assets/wemade-building.png'), 'service worker should cache replaceable building art');
 assert.ok(serviceWorker.includes('assets/wemade-building-mid.png'), 'service worker should cache the mid-stage building art');
 assert.ok(serviceWorker.includes('assets/wemade-building-final.png'), 'service worker should cache the final-stage building art');

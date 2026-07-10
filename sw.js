@@ -1,9 +1,9 @@
-const CACHE_NAME = 'garlicdone-pwa-v9';
+const CACHE_NAME = 'garlicdone-pwa-v10';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './styles.css',
-  './game.js',
+  './styles.css?v=20260710-v10',
+  './game.js?v=20260710-v10',
   './supabase-config.js',
   './manifest.webmanifest',
   './assets/wemade-building.png',
@@ -56,15 +56,14 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
         }
         return response;
-      });
-      return cached || network;
-    })
+      })
+      .catch(() => caches.match(request))
   );
 });
