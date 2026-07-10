@@ -42,6 +42,15 @@ global.navigator = {};
 const manifest = JSON.parse(fs.readFileSync('manifest.webmanifest', 'utf8'));
 assert.equal(manifest.display, 'standalone', 'PWA manifest should launch in standalone mode');
 assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512'), 'PWA manifest should include a 512px icon');
+const html = fs.readFileSync('index.html', 'utf8');
+assert.ok(html.includes('WEMADE PLAY FARM CHALLENGE'), 'title/result screens should include the WEMADE PLAY challenge badge');
+assert.ok(html.includes('level-label') && html.includes('timer-label') && html.includes('xp-fill'), 'HUD should expose level, timer, and XP progress elements');
+assert.ok(html.includes('width="1280" height="720"'), 'canvas should default to a 16:9 landscape baseline');
+const css = fs.readFileSync('styles.css', 'utf8');
+assert.ok(css.includes('html, body, #game-shell'), 'root containers should share fixed full-frame sizing');
+assert.ok(css.includes('overflow: hidden'), 'page layout should prevent iframe scrollbars');
+assert.ok(css.includes('aspect-ratio: 16 / 9'), 'game shell should declare the 16:9 design basis');
+assert.equal(manifest.orientation, 'landscape-primary', 'PWA manifest should prefer landscape play');
 ['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png'].forEach((file) => {
   assert.ok(fs.existsSync(file), `${file} should exist for installable PWA icons`);
 });
@@ -53,6 +62,8 @@ const source = fs.readFileSync('game.js', 'utf8').replace('new Game();', 'global
 vm.runInThisContext(source, { filename: 'game.js' });
 
 const game = global.testGame;
+assert.equal(game.state, 'title', 'game should open directly without a blocking login gate');
+assert.equal(game.profile.name, '농부', 'default guest farmer should allow immediate iframe play');
 game.tutorialDone = true;
 game.enterFarm('테스트농부');
 assert.equal(JSON.parse(localStorage.getItem('garlic-profile')).name, '테스트농부', 'nickname should persist');
@@ -119,10 +130,26 @@ assert.equal(game.lives, livesBefore - 1, 'failure should consume one chance');
 assert.equal(game.combo, 0, 'failure should reset combo');
 
 game.gameOver();
-assert.ok(elements.get('result-stats').innerHTML.includes('숙련도'), 'result screen should summarize mastery stats');
+assert.ok(elements.get('result-stats').innerHTML.includes('도달 레벨'), 'result screen should summarize reached level');
+assert.ok(elements.get('result-stats').innerHTML.includes('챌린지 시간'), 'result screen should summarize challenge time');
 assert.ok(elements.get('result-goal').textContent.includes('다음 목표'), 'result screen should offer a replay goal');
 const ranking = JSON.parse(localStorage.getItem('garlic-world-cache'));
 assert.equal(ranking[0].name, '테스트농부', 'ranking should use the active nickname');
 assert.ok(ranking[0].cm > 0, 'ranking should save harvested centimeters');
 
-console.log('Smoke test passed: login, release harvest, failure, cm scoring, ranking, record storage, and PWA files.');
+game.start();
+let simulatedSeconds = 0;
+for (let i = 0; i < 60 * 60 && !game.levelMaxed && game.state === 'playing'; i++) {
+  if (!game.plant.resolved) {
+    game.input.held = true;
+    game.input.power = game.plant.targetForce(game.time);
+    game.input.angle = game.plant.targetAngle(game.time);
+  }
+  game.update(1 / 60);
+  simulatedSeconds += 1 / 60;
+}
+assert.equal(game.levelMaxed, true, 'skillful play should reach max level inside the 60-second challenge');
+assert.ok(game.levelMaxTime <= 60, `max level should be reached within 60 seconds, got ${game.levelMaxTime}`);
+assert.ok(elements.get('level-label').textContent.includes('MAX'), 'HUD should show max level clearly');
+
+console.log('Smoke test passed: login, release harvest, failure, cm scoring, ranking, record storage, 60s max level, and PWA files.');

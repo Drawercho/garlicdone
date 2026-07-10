@@ -9,6 +9,9 @@
   const MAX_LIVES = 5;
   const PLANTS_PER_STAGE = 4;
   const MAX_STAGE = 5;
+  const MAX_LEVEL = 10;
+  const CHALLENGE_SECONDS = 60;
+  const LEVEL_THRESHOLDS = [0, 95, 200, 325, 470, 635, 815, 1015, 1245, 1500];
   const RELEASE_HARVEST_MIN = .68;
   const AUTO_HARVEST_PROGRESS = 1;
   const FIELD_CLEAR_DURATION = 2.2;
@@ -20,6 +23,12 @@
   ];
   const formatCm = (value) => `${Number(value || 0).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}cm`;
   const scoreValue = (row) => Number(row?.cm ?? row?.score ?? 0);
+  const formatTime = (seconds) => `${Math.max(0, seconds || 0).toFixed(1)}초`;
+  const levelFromXp = (xp) => {
+    let level = 1;
+    for (let i = 1; i < MAX_LEVEL; i++) if (xp >= LEVEL_THRESHOLDS[i]) level = i + 1;
+    return level;
+  };
 
   class RNG {
     constructor(seed = Date.now()) { this.seed = seed >>> 0; }
@@ -134,7 +143,7 @@
     { skyTop: '#81c9f1', skyBottom: '#ffe0a8', sun: '#fff0b6', cloud: 'rgba(255,248,225,.76)', hillA: '#a4ca63', hillB: '#7fad53', soilA: '#ba7840', soilB: '#945d34', soilC: '#603c25', ridge: '#d79a53', crop: '#3f8542', sign: '#8a5d34', prop: 'flowers', label: '햇살 밭' },
     { skyTop: '#c09de6', skyBottom: '#ffe0ae', sun: '#ffd78a', cloud: 'rgba(255,235,200,.68)', hillA: '#b8b95d', hillB: '#8e9a4a', soilA: '#9b6540', soilB: '#754b31', soilC: '#4c3325', ridge: '#c9874f', crop: '#586f35', sign: '#76482d', prop: 'crates', label: '노을 밭' },
     { skyTop: '#6f9fd0', skyBottom: '#cfd99c', sun: '#f5f7d1', cloud: 'rgba(240,248,255,.56)', hillA: '#74895a', hillB: '#596f4c', soilA: '#7a5638', soilB: '#5b3f2d', soilC: '#36281f', ridge: '#a56e42', crop: '#315b37', sign: '#5e3d28', prop: 'flags', label: '고수 밭' },
-    { skyTop: '#344c84', skyBottom: '#b8d49a', sun: '#f9f2b5', cloud: 'rgba(245,249,255,.46)', hillA: '#61764e', hillB: '#435d3e', soilA: '#6e4a35', soilB: '#4e362a', soilC: '#2b211b', ridge: '#9a643d', crop: '#b4ca67', sign: '#523623', prop: 'festival', label: '만렙 밭' }
+    { skyTop: '#344c84', skyBottom: '#b8d49a', sun: '#f9f2b5', cloud: 'rgba(245,249,255,.46)', hillA: '#61764e', hillB: '#435d3e', soilA: '#6e4a35', soilB: '#4e362a', soilC: '#2b211b', ridge: '#9a643d', crop: '#b4ca67', sign: '#523623', prop: 'festival', label: '축제 밭' }
   ];
 
   class Plant {
@@ -297,13 +306,14 @@
       this.ctx = this.canvas.getContext('2d');
       this.sound = new Sound();
       this.rng = new RNG();
-      this.profile = this.readStored('garlic-profile', null);
+      this.profile = this.readStored('garlic-profile', null) || { name: '농부' };
       this.worldRanking = new SupabaseRanking(globalThis.GARLIC_WORLD_RANKING || globalThis.window?.GARLIC_WORLD_RANKING || {});
       this.rankings = this.readStored('garlic-world-cache', this.readStored('garlic-rankings', []));
       this.rankingStatus = this.worldRanking.enabled ? '월드 랭킹을 불러오는 중…' : 'Supabase 연결 대기 중';
       this.installPrompt = null;
       this.state = this.profile ? 'title' : 'login';
       this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES;
+      this.level = 1; this.levelXp = 0; this.levelMaxed = false; this.levelMaxTime = 0; this.runTime = 0; this.levelPulse = 0; this.maxLevelBanner = 0; this.challengeSurgeShown = false;
       this.best = Number(localStorage.getItem('garlic-best') || 0);
       this.bestCombo = Number(localStorage.getItem('garlic-best-combo') || 0);
       this.bestPerfect = Number(localStorage.getItem('garlic-best-perfect') || 0);
@@ -320,6 +330,8 @@
       this.stageBanner = 0;
       this.fieldClearTimer = 0;
       this.fieldClearStage = 0;
+      this.friendMood = 'idle';
+      this.friendMoodTimer = 0;
       this.tutorialStep = -1;
       this.tutorialDone = localStorage.getItem('garlic-tutorial') === '1';
       this.input = { held: false, power: 0, angle: 0, pointerId: null, x: 0, y: 0, grabX: 0, grabY: 0, grabAngle: 0, keyboard: false };
@@ -372,6 +384,63 @@
       if (this.rankReturnState === 'gameover') {
         this.state = 'gameover'; this.showCard('result-card');
       } else this.showTitle();
+    }
+    levelProgress() {
+      if (this.level >= MAX_LEVEL) return 1;
+      const prev = LEVEL_THRESHOLDS[this.level - 1] || 0;
+      const next = LEVEL_THRESHOLDS[this.level] || LEVEL_THRESHOLDS[MAX_LEVEL - 1];
+      return clamp((this.levelXp - prev) / Math.max(1, next - prev));
+    }
+    successLevelXp(p, handling, speedBonus) {
+      const comboBoost = Math.min(this.combo, 8) * 5;
+      const timeAssist = this.runTime > 38 && !this.levelMaxed ? Math.min(42, (this.runTime - 38) * 1.45) : 0;
+      const lessonBoost = p.lesson ? 18 : 0;
+      const rareBoost = p.key === 'golden' ? 35 : 0;
+      return Math.round(100 + handling * 30 + speedBonus * 12 + comboBoost + lessonBoost + rareBoost + (p.perfect ? 32 : 0) + timeAssist);
+    }
+    failLevelXp(p) {
+      const timeAssist = this.runTime > 42 && !this.levelMaxed ? Math.min(28, (this.runTime - 42) * 1.25) : 0;
+      return Math.round(34 + p.progress * 48 + (p.lesson ? 18 : 0) + timeAssist);
+    }
+    awardLevelXp(amount, mood = 'good') {
+      if (this.levelMaxed || amount <= 0) return;
+      const before = this.level;
+      const cap = LEVEL_THRESHOLDS[MAX_LEVEL - 1];
+      this.levelXp = Math.min(cap, this.levelXp + amount);
+      this.level = levelFromXp(this.levelXp);
+      if (this.level > before) {
+        this.levelPulse = 1;
+        this.friendMood = mood === 'fail' ? 'cheer' : 'good';
+        this.friendMoodTimer = 1.5;
+        this.burst(this.w / 2, this.h * .22, 'level', Math.min(12 + this.level * 2, 30));
+        if (this.level < MAX_LEVEL) {
+          this.sound.stage();
+          this.toast(`Lv.${this.level} 숙련도 상승!`, 'good');
+        }
+      }
+      if (this.level >= MAX_LEVEL) this.reachMaxLevel();
+    }
+    reachMaxLevel() {
+      if (this.levelMaxed) return;
+      this.level = MAX_LEVEL;
+      this.levelXp = LEVEL_THRESHOLDS[MAX_LEVEL - 1];
+      this.levelMaxed = true;
+      this.levelMaxTime = this.runTime;
+      this.maxLevelBanner = 3.1;
+      this.levelPulse = 1;
+      this.friendMood = 'max';
+      this.friendMoodTimer = 3.2;
+      this.shake = Math.max(this.shake, 22);
+      this.flash = Math.max(this.flash, 1.25);
+      this.slow = Math.min(this.slow, .18);
+      this.sound.stage();
+      this.sound.success(true);
+      if (navigator.vibrate) navigator.vibrate([35, 30, 90]);
+      this.burst(this.w / 2, this.h * .32, 'perfect', 90);
+      this.burst(this.w * .28, this.h * .56, 'level', 34);
+      this.burst(this.w * .72, this.h * .56, 'level', 34);
+      this.popScore('마늘쫑 장인 달성! MAX LEVEL!');
+      this.toast(`MAX LEVEL · ${formatTime(this.levelMaxTime)} 달성!`, 'good');
     }
     isStandalone() {
       const media = typeof matchMedia === 'function' ? matchMedia('(display-mode: standalone)') : null;
@@ -527,6 +596,7 @@
       this.sound.init();
       this.rng = new RNG(Date.now());
       this.state = 'playing'; this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES; this.runSaved = false; this.completed = false;
+      this.level = 1; this.levelXp = 0; this.levelMaxed = false; this.levelMaxTime = 0; this.runTime = 0; this.levelPulse = 0; this.maxLevelBanner = 0; this.challengeSurgeShown = false; this.friendMood = 'idle'; this.friendMoodTimer = 0;
       this.time = 0; this.particles.length = 0; this.transitionTimer = 0; this.stageBanner = 1.5; this.fieldClearTimer = 0; this.fieldClearStage = 0;
       this.input.power = 0; this.input.angle = 0; this.input.held = false;
       this.plant = new Plant(this.stage, this.plantNo - 1, this.rng);
@@ -702,13 +772,27 @@
     }
     update(dt) {
       this.time += dt;
+      if (this.state === 'playing') this.runTime += dt;
       this.messageTimer = Math.max(0, this.messageTimer - dt);
       this.warningCooldown = Math.max(0, this.warningCooldown - dt);
       this.flash = Math.max(0, this.flash - dt * 2.4);
       this.shake = Math.max(0, this.shake - dt * 24);
       this.stageBanner = Math.max(0, this.stageBanner - dt);
       this.fieldClearTimer = Math.max(0, this.fieldClearTimer - dt);
+      this.levelPulse = Math.max(0, this.levelPulse - dt * 2.6);
+      this.maxLevelBanner = Math.max(0, this.maxLevelBanner - dt);
+      this.friendMoodTimer = Math.max(0, this.friendMoodTimer - dt);
+      if (this.friendMoodTimer <= 0 && this.friendMood !== 'max') this.friendMood = 'idle';
       if (this.state !== 'playing') return;
+      if (!this.levelMaxed && this.runTime > 50 && this.level >= 8) {
+        if (!this.challengeSurgeShown) {
+          this.challengeSurgeShown = true;
+          this.friendMood = 'good';
+          this.friendMoodTimer = 1.6;
+          this.toast('WEMADE PLAY 응원 타임 · 마지막 스퍼트!', 'good');
+        }
+        this.awardLevelXp((this.level >= 9 ? 45 : 26) * dt, 'good');
+      }
       this.updateTutorial();
       if (this.input.keyboard) {
         const dp = (this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('ArrowDown') ? 1 : 0);
@@ -843,19 +927,26 @@
       if (streakPop) this.burst(this.w / 2, this.h * .34, 'perfect', 18);
       this.popScore(`${p.perfect ? '완벽 뽑기! ' : streakPop ? `${this.combo}콤보 쑤욱! ` : '쑤욱! '}+${formatCm(p.cm)}`);
       this.toast(p.perfect ? '손맛 최고! 온전한 한 줄기' : streakPop ? `${this.combo}연속 수확! 감 잡았어요` : `${p.type.name} 수확!`, 'good');
+      this.friendMood = p.perfect || streakPop ? 'max' : 'good'; this.friendMoodTimer = p.perfect || streakPop ? 1.9 : 1.25;
+      this.awardLevelXp(this.successLevelXp(p, handling, speedBonus), p.perfect ? 'max' : 'good');
       this.saveBest(); this.updateUI();
     }
     fail(reason) {
       const p = this.plant; if (p.resolved) return;
+      const xp = this.failLevelXp(p);
       p.failReason = reason; p.failTip = this.failAdvice(reason); p.resolved = true; p.outcomeTime = 0; this.lives--; this.combo = 0;
       this.lastFailReason = reason; this.lastFailTip = p.failTip;
       this.input.held = false; this.canvas.classList.remove('grabbing'); this.shake = 8;
       this.sound.fail(); if (navigator.vibrate) navigator.vibrate(60);
       this.burst(this.w / 2, this.h * .47, 'fail', 25);
+      this.friendMood = 'fail'; this.friendMoodTimer = 1.5;
+      this.awardLevelXp(xp, 'fail');
       this.toast(reason, 'bad'); this.updateUI();
     }
     masteryGrade() {
       const perfectRate = this.harvested ? this.perfectCount / this.harvested : 0;
+      if (this.levelMaxed && perfectRate >= .45 && this.maxCombo >= 8) return '마늘쫑 장인';
+      if (this.levelMaxed) return 'Lv.10 농부';
       if (this.completed && perfectRate >= .55 && this.maxCombo >= 10) return '쑥 장인';
       if (this.completed) return '완주 농부';
       if (this.stage >= 4 || this.maxCombo >= 8) return '숙련 농부';
@@ -863,6 +954,8 @@
       return '새싹 농부';
     }
     nextGoalText(isNewBest) {
+      if (this.levelMaxed && !this.completed) return `만렙 이후 목표: 남은 밭을 완주하며 ${formatCm(Math.max(this.best, this.score) + 20)} 이상 수확하기.`;
+      if (!this.levelMaxed) return `다음 목표: 60초 안에 Lv.${MAX_LEVEL} 마늘쫑 장인 달성하기. 지금은 Lv.${this.level}/${MAX_LEVEL}!`;
       if (this.completed && this.perfectCount < Math.max(8, Math.ceil(this.harvested * .5))) return '다음 목표: 만렙 완주 유지하면서 완벽 뽑기 비율 50% 넘기기.';
       if (this.completed && this.maxCombo < PLANTS_PER_STAGE * MAX_STAGE) return '다음 목표: 끊기지 않고 20연속 콤보 완주하기.';
       if (this.completed) return isNewBest ? '월드 랭킹용 기록감이에요. 이제 완벽 수확 수로 자기 자신과 싸워볼 차례!' : '만렙 이후 목표: 최고 cm, 완벽 수확, 20콤보를 동시에 노려보세요.';
@@ -872,14 +965,16 @@
     gameOver() {
       const isNewBest = this.score > this.best;
       this.state = 'gameover'; this.saveBest(); this.saveBestStats(); this.saveRunToRanking(); this.hideTutorial();
-      $('result-title').textContent = this.completed ? '만렙 밭 완주!' : isNewBest && this.score > 0 ? '새로운 최고 기록!' : '오늘 수확 끝!';
+      $('result-title').textContent = this.levelMaxed ? '마늘쫑 장인 달성!' : this.completed ? '5개 밭 완주!' : isNewBest && this.score > 0 ? '새로운 최고 기록!' : '오늘 수확 끝!';
       $('final-score').textContent = formatCm(this.score);
-      $('result-copy').textContent = `${this.profile?.name || '농부'}님은 마늘쫑 ${this.harvested}줄기를 ${formatCm(this.score)} 수확해 밭 ${this.stage}/${MAX_STAGE}까지 도착했습니다.`;
+      $('result-copy').textContent = `${this.profile?.name || '농부'}님은 ${formatTime(this.runTime)} 동안 마늘쫑 ${this.harvested}줄기를 ${formatCm(this.score)} 수확해 Lv.${this.level}/${MAX_LEVEL}, 밭 ${this.stage}/${MAX_STAGE}까지 도착했습니다.`;
       $('result-stats').innerHTML = [
-        `<span>숙련도<strong>${this.masteryGrade()}</strong></span>`,
-        `<span>최대 콤보<strong>x${this.maxCombo}</strong></span>`,
-        `<span>완벽 수확<strong>${this.perfectCount}줄</strong></span>`
+        `<span>도달 레벨<strong>${this.levelMaxed ? 'MAX' : `Lv.${this.level}`}</strong></span>`,
+        `<span>챌린지 시간<strong>${this.levelMaxed ? formatTime(this.levelMaxTime) : formatTime(this.runTime)}</strong></span>`,
+        `<span>완벽 수확<strong>${this.perfectCount}줄</strong></span>`,
+        `<span>최대 콤보<strong>x${this.maxCombo}</strong></span>`
       ].join('');
+      $('result-event-badge').textContent = this.levelMaxed ? 'WEMADE PLAY FARM CHALLENGE · MAX LEVEL' : 'WEMADE PLAY FARM CHALLENGE';
       $('result-goal').textContent = this.nextGoalText(isNewBest);
       $('result-eyebrow').textContent = `최고 기록 ${formatCm(this.best)}`;
       $('result-card').classList.remove('hidden'); $('start-card').classList.add('hidden');
@@ -899,6 +994,7 @@
         fiber: { vx: [-75,75], vy: [-80,-20], life: [.18,.4], size: [1,3], colors: ['#e8f2b7','#c9df85','#f7f1cb'], gravity: 190 },
         success: { vx: [-250,250], vy: [-360,-80], life: [.55,1.1], size: [3,9], colors: ['#f7d45d','#fff3a5','#69b650','#ffffff'], gravity: 420, shape: 'leaf' },
         perfect: { vx: [-330,330], vy: [-470,-100], life: [.7,1.4], size: [4,11], colors: ['#ffe25c','#fffbd0','#7be071','#ffffff','#f39e51'], gravity: 400, shape: 'star' },
+        level: { vx: [-290,290], vy: [-390,-70], life: [.55,1.15], size: [3,10], colors: ['#fff16c','#ffcf53','#7edc67','#ffffff','#77b8ff'], gravity: 360, shape: 'star' },
         fail: { vx: [-180,180], vy: [-220,30], life: [.4,.8], size: [3,8], colors: ['#8b623e','#d9694e','#6b8d3c'], gravity: 480 }
       };
       const o = presets[kind];
@@ -918,6 +1014,11 @@
       $('lives').textContent = `${'● '.repeat(this.lives)}${'○ '.repeat(Math.max(0, MAX_LIVES - this.lives))}`.trim();
       $('score').textContent = formatCm(this.score);
       $('hud-player').textContent = this.profile ? `· ${this.profile.name}` : '';
+      $('level-label').textContent = this.levelMaxed ? `MAX Lv.${MAX_LEVEL}` : `Lv.${this.level} / ${MAX_LEVEL}`;
+      $('timer-label').textContent = this.levelMaxed ? `${formatTime(this.levelMaxTime)} 달성` : `남은 ${Math.max(0, Math.ceil(CHALLENGE_SECONDS - this.runTime))}초`;
+      $('xp-fill').style.width = `${this.levelProgress() * 100}%`;
+      $('level-wrap').classList.toggle('maxed', this.levelMaxed);
+      $('level-wrap').classList.toggle('rush', !this.levelMaxed && this.runTime > 45);
       $('combo').textContent = `x${this.combo + 1}`; $('combo').classList.toggle('active', this.combo > 0);
       $('action-hint').textContent = p.resolved ? (p.failReason ? '다음 마늘쫑 준비 중…' : '기분 좋게 쑤욱!') : p.feedback;
       $('meter-panel').classList.toggle('lesson-mode', Boolean(p.lesson && !p.resolved));
@@ -953,6 +1054,7 @@
       }
       this.cloud(ctx, w * .18 + Math.sin(this.time * .07) * 20, h * .18, Math.min(1, w / 700), theme.cloud);
       this.cloud(ctx, w * .64 + Math.sin(this.time * .05 + 2) * 14, h * .28, .65, theme.cloud);
+      this.drawWemadePlayCampus(ctx, theme, ground);
       ctx.fillStyle = theme.hillA;
       ctx.beginPath(); ctx.moveTo(0, ground); ctx.quadraticCurveTo(w * .2, ground - 115, w * .44, ground); ctx.quadraticCurveTo(w * .72, ground - 145, w, ground - 15); ctx.lineTo(w, ground); ctx.fill();
       ctx.fillStyle = theme.hillB;
@@ -972,6 +1074,41 @@
       ctx.globalAlpha = .2; ctx.strokeStyle = theme.ridge; ctx.lineWidth = 2;
       for (let y = ground + 55; y < h; y += 47) { ctx.beginPath(); ctx.moveTo(0, y); ctx.bezierCurveTo(w * .3, y - 18, w * .65, y + 18, w, y - 3); ctx.stroke(); }
       ctx.globalAlpha = 1;
+    }
+    drawWemadePlayCampus(ctx, theme, ground) {
+      const w = this.w, h = this.h;
+      const scale = clamp(w / 820, .62, 1);
+      const x = w * .76, y = ground - 124 * scale;
+      ctx.save();
+      ctx.globalAlpha = w < 520 ? .54 : .72;
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+
+      ctx.fillStyle = 'rgba(70, 96, 98, .18)';
+      ctx.beginPath(); ctx.ellipse(8, 118, 118, 16, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(82, 111, 112, .62)';
+      ctx.strokeStyle = 'rgba(255, 250, 220, .42)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(-58, 20, 116, 96, 10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 241, 170, .8)';
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 4; col++) {
+          ctx.beginPath(); ctx.roundRect(-42 + col * 27, 36 + row * 20, 14, 10, 3); ctx.fill();
+        }
+      }
+      ctx.fillStyle = 'rgba(255, 249, 218, .94)';
+      ctx.strokeStyle = theme.sign;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.roundRect(-70, -2, 140, 30, 12); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#315f38';
+      ctx.textAlign = 'center';
+      ctx.font = '950 13px sans-serif';
+      ctx.fillText('WEMADE PLAY', 0, 18);
+      ctx.fillStyle = '#f1c54f';
+      ctx.beginPath(); ctx.arc(-52, 13, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#66b95d';
+      ctx.beginPath(); ctx.arc(52, 13, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     }
     drawStageProps(ctx, theme, ground) {
       const w = this.w, h = this.h;
@@ -1485,8 +1622,116 @@
       ctx.fillText('끊어지기 직전 · 힘 빼기!', this.w / 2, y);
       ctx.restore();
     }
+    drawSupportFriend(ctx) {
+      if (this.state !== 'playing' && this.state !== 'gameover') return;
+      const w = this.w, h = this.h, ground = h * .66;
+      const mood = this.levelMaxed && (this.friendMood === 'max' || this.maxLevelBanner > 0) ? 'max' : this.friendMood;
+      const x = w < 560 ? w * .83 : w * .82;
+      const y = ground + Math.min(78, h * .13);
+      const bob = Math.sin(this.time * 3.2) * (mood === 'max' ? 5 : 2.3);
+      const scale = w < 560 ? .72 : .9;
+      const speech = mood === 'max' ? 'MAX 축하!'
+        : mood === 'fail' ? '다시 쑥!'
+          : mood === 'good' ? '좋아!'
+            : this.input.held ? '천천히!' : 'PLAY!';
+
+      ctx.save();
+      ctx.translate(x, y + bob);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = .95;
+      ctx.fillStyle = 'rgba(45,32,20,.22)';
+      ctx.beginPath(); ctx.ellipse(0, 43, 58, 12, 0, 0, Math.PI * 2); ctx.fill();
+
+      ctx.save();
+      ctx.rotate(Math.sin(this.time * 5) * .045);
+      ctx.fillStyle = '#f5c45d';
+      ctx.strokeStyle = '#6b4e31';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(0, 3, 38, 42, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ffe79a';
+      ctx.beginPath(); ctx.ellipse(0, 13, 25, 24, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#f5c45d';
+      ctx.strokeStyle = '#6b4e31';
+      ctx.beginPath(); ctx.ellipse(-25, -29, 13, 18, -.55, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(25, -29, 13, 18, .55, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#3a3429';
+      const eyeY = mood === 'fail' ? -4 : -7;
+      if (mood === 'max') {
+        ctx.font = '900 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('✦', -13, eyeY); ctx.fillText('✦', 13, eyeY);
+      } else {
+        ctx.beginPath(); ctx.arc(-13, eyeY, 3.8, 0, Math.PI * 2); ctx.arc(13, eyeY, 3.8, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.strokeStyle = '#3a3429'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+      ctx.beginPath();
+      if (mood === 'fail') ctx.arc(0, 16, 8, Math.PI * 1.08, Math.PI * 1.92);
+      else ctx.arc(0, 8, 10, .15, Math.PI - .15);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.strokeStyle = '#6b4e31'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(28, -2); ctx.lineTo(58, -29); ctx.stroke();
+      ctx.fillStyle = '#fff8d8'; ctx.strokeStyle = '#5d7e42'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(46, -48, 78, 28, 10); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#315f38'; ctx.textAlign = 'center'; ctx.font = '950 10px sans-serif';
+      ctx.fillText('WEMADE', 85, -37);
+      ctx.fillText('PLAY', 85, -27);
+
+      ctx.fillStyle = mood === 'max' ? 'rgba(255,246,194,.97)' : 'rgba(255,250,224,.94)';
+      ctx.strokeStyle = mood === 'fail' ? '#d96a52' : '#5d7e42';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.roundRect(-68, -72, 102, 34, 15); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = mood === 'fail' ? '#bd493d' : '#315f38';
+      ctx.textAlign = 'center'; ctx.font = '950 13px sans-serif';
+      ctx.fillText(speech, -17, -50);
+      ctx.restore();
+    }
+    drawMaxLevelCelebration(ctx) {
+      if (this.maxLevelBanner <= 0) return;
+      const t = 1 - this.maxLevelBanner / 3.1;
+      const a = Math.min(1, this.maxLevelBanner * 2.2, t * 5);
+      const pulse = 1 + Math.sin(this.time * 12) * .025;
+      const cx = this.w / 2, cy = this.h * .32;
+      ctx.save();
+      ctx.globalAlpha = clamp(a);
+      ctx.translate(cx, cy);
+      ctx.scale(pulse, pulse);
+
+      const panelW = Math.min(470, this.w - 28);
+      const panelH = 142;
+      ctx.fillStyle = 'rgba(255,248,210,.97)';
+      ctx.strokeStyle = '#e0a735';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.roundRect(-panelW / 2, -panelH / 2, panelW, panelH, 28); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,224,90,.22)';
+      ctx.beginPath(); ctx.roundRect(-panelW / 2 + 14, 15, panelW - 28, 38, 18); ctx.fill();
+
+      for (let i = 0; i < 9; i++) {
+        const x = -panelW * .42 + i * panelW * .105;
+        const y = 58 + Math.sin(this.time * 5 + i) * 6;
+        ctx.strokeStyle = i % 2 ? '#5dbb58' : '#f0bb44';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(x, y + 24); ctx.quadraticCurveTo(x + 12, y - 2, x + 30, y + 7); ctx.stroke();
+      }
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#e17b3c';
+      ctx.strokeStyle = '#fff5bd';
+      ctx.lineWidth = 7;
+      ctx.font = `950 ${Math.min(42, this.w * .078)}px sans-serif`;
+      ctx.strokeText('마늘쫑 장인 달성!', 0, -24);
+      ctx.fillText('마늘쫑 장인 달성!', 0, -24);
+      ctx.fillStyle = '#315f38';
+      ctx.font = '950 21px sans-serif';
+      ctx.fillText('MAX LEVEL', 0, 17);
+      ctx.fillStyle = '#6c7448';
+      ctx.font = '900 12px sans-serif';
+      ctx.fillText(`WEMADE PLAY FARM CHALLENGE · ${formatTime(this.levelMaxTime)}`, 0, 43);
+      ctx.restore();
+    }
     drawForeground(ctx) {
       if (this.state === 'playing' || this.state === 'gameover') this.drawHarvestPile(ctx);
+      this.drawSupportFriend(ctx);
       this.drawFieldClear(ctx);
       this.drawWarningOverlay(ctx);
       if (this.stageBanner > 0 && this.state === 'playing') {
@@ -1499,6 +1744,7 @@
       if (this.plant.key === 'golden' && !this.plant.resolved && this.state === 'playing') {
         ctx.save(); ctx.globalAlpha = .65 + Math.sin(this.time * 5) * .2; ctx.fillStyle = '#fff1a2'; ctx.textAlign = 'center'; ctx.font = '900 16px sans-serif'; ctx.fillText('✦ 황금 마늘쫑 · 희귀 장줄기 ✦', this.w / 2, this.h * .13); ctx.restore();
       }
+      this.drawMaxLevelCelebration(ctx);
       if (this.flash > 0) { ctx.fillStyle = `rgba(255,255,220,${this.flash * .38})`; ctx.fillRect(0,0,this.w,this.h); }
     }
     loop(now) {

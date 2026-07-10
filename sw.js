@@ -1,4 +1,4 @@
-const CACHE_NAME = 'garlicdone-pwa-v1';
+const CACHE_NAME = 'garlicdone-pwa-v3';
 const CORE_ASSETS = [
   './',
   './index.html',

@@ -17,7 +17,7 @@
 </head>
 <body>
   <main id="game-shell" aria-label="마늘쫑 뽑기 게임">
-    <canvas id="game" width="960" height="640" aria-label="게임 화면"></canvas>
+    <canvas id="game" width="1280" height="720" aria-label="게임 화면"></canvas>
 
     <header class="hud" aria-live="polite">
       <div class="brand"><span>🌱</span> 마늘쫑 뽑기 <small id="hud-player"></small></div>
@@ -25,6 +25,13 @@
         <span id="stage-label">밭 1</span>
         <span id="plant-label">1 / 4</span>
         <span id="lives" aria-label="남은 기회">● ● ● ● ●</span>
+      </div>
+      <div id="level-wrap" class="level-wrap" aria-label="60초 챌린지 레벨">
+        <div class="level-line">
+          <strong id="level-label">Lv.1 / 10</strong>
+          <span id="timer-label">60초 챌린지</span>
+        </div>
+        <div class="xp-track" aria-hidden="true"><b id="xp-fill"></b></div>
       </div>
       <div class="score-wrap">
         <span class="score-caption">수확 길이</span>
@@ -50,19 +57,20 @@
     <section id="overlay" class="overlay visible">
       <div id="login-card" class="card login-card">
         <div class="login-mark" aria-hidden="true">🌱</div>
-        <p class="eyebrow">마늘밭 입장 명부</p>
+        <p class="eyebrow">닉네임 설정</p>
         <h2>농부 이름을<br>알려주세요</h2>
-        <p>수확 길이와 월드 랭킹에 표시할 닉네임입니다.<br>이 기기에 저장돼요.</p>
+        <p>원하면 수확 길이와 월드 랭킹에 표시할 닉네임을 바꿀 수 있어요.<br>기본 농부로도 바로 플레이됩니다.</p>
         <form id="login-form" novalidate>
           <label for="nickname">닉네임</label>
           <input id="nickname" name="nickname" maxlength="10" autocomplete="nickname" placeholder="예: 쑥쑥농부" />
           <span id="nickname-error" class="field-error"></span>
-          <button class="primary" type="submit">마늘밭 입장하기</button>
+          <button class="primary" type="submit">닉네임 저장하기</button>
         </form>
       </div>
 
       <div id="start-card" class="card start-card hidden">
         <p class="eyebrow">손끝 농사 아케이드</p>
+        <div class="wemade-badge">WEMADE PLAY FARM CHALLENGE</div>
         <div class="farmer-welcome"><span id="farmer-name">농부</span>님, 오늘도 한 줄기!</div>
         <h1>힘주어, 조심히.<br><em>쑤욱!</em></h1>
         <p>땅에 남는 마늘 잎대의 중심에서 마늘쫑만 쏙 뽑아냅니다. 위로 당겨 힘을 주고, 기우는 방향에 맞춰 좌우로 움직이세요.</p>
@@ -77,6 +85,7 @@
 
       <div id="result-card" class="card result-card hidden">
         <p id="result-eyebrow" class="eyebrow">오늘 농사 끝!</p>
+        <div id="result-event-badge" class="wemade-badge">WEMADE PLAY FARM CHALLENGE</div>
         <h2 id="result-title">수확 완료</h2>
         <div id="final-score" class="final-score">0.0cm</div>
         <p id="result-copy"></p>

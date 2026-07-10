@@ -9,7 +9,7 @@
   "scope": "./",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
-  "orientation": "portrait-primary",
+  "orientation": "landscape-primary",
   "background_color": "#dff3be",
   "theme_color": "#5da553",
   "categories": ["games", "entertainment"],
