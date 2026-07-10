@@ -178,7 +178,7 @@ h1 em { color: #e67c3b; font-style: normal; text-shadow: 0 5px 0 #f4cb65; }
 }
 .primary:hover { filter: brightness(1.06); transform: translateY(-1px); }
 .primary:active { transform: translateY(4px); box-shadow: 0 2px 0 #2d6a37; }
-.menu-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 13px; }
+.menu-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 9px; margin-top: 13px; }
 .secondary {
   padding: 11px 14px;
   border: 2px solid #ccd6a3;
@@ -192,6 +192,11 @@ h1 em { color: #e67c3b; font-style: normal; text-shadow: 0 5px 0 #f4cb65; }
 }
 .secondary:hover { background: #fff8dc; }
 .secondary:active { transform: translateY(2px); box-shadow: 0 1px 0 #c8c099; }
+.secondary.install {
+  border-color: #94c978;
+  color: #2f6b39;
+  background: #edf7cf;
+}
 .secondary.quiet { color: #6a705d; background: transparent; }
 .secondary.wide { width: 100%; margin-top: 12px; }
 .best-row { margin-top: 17px; font-size: 12px; opacity: .75; }

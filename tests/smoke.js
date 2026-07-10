@@ -39,6 +39,16 @@ global.requestAnimationFrame = () => 0;
 global.devicePixelRatio = 1;
 global.navigator = {};
 
+const manifest = JSON.parse(fs.readFileSync('manifest.webmanifest', 'utf8'));
+assert.equal(manifest.display, 'standalone', 'PWA manifest should launch in standalone mode');
+assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512'), 'PWA manifest should include a 512px icon');
+['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png'].forEach((file) => {
+  assert.ok(fs.existsSync(file), `${file} should exist for installable PWA icons`);
+});
+const serviceWorker = fs.readFileSync('sw.js', 'utf8');
+assert.ok(serviceWorker.includes('manifest.webmanifest'), 'service worker should cache the manifest');
+assert.ok(serviceWorker.includes('supabase-config.js'), 'service worker should cache runtime config for the app shell');
+
 const source = fs.readFileSync('game.js', 'utf8').replace('new Game();', 'globalThis.testGame = new Game();');
 vm.runInThisContext(source, { filename: 'game.js' });
 
@@ -115,4 +125,4 @@ const ranking = JSON.parse(localStorage.getItem('garlic-world-cache'));
 assert.equal(ranking[0].name, '테스트농부', 'ranking should use the active nickname');
 assert.ok(ranking[0].cm > 0, 'ranking should save harvested centimeters');
 
-console.log('Smoke test passed: login, release harvest, failure, cm scoring, ranking, and record storage.');
+console.log('Smoke test passed: login, release harvest, failure, cm scoring, ranking, record storage, and PWA files.');

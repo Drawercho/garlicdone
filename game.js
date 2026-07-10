@@ -301,6 +301,7 @@
       this.worldRanking = new SupabaseRanking(globalThis.GARLIC_WORLD_RANKING || globalThis.window?.GARLIC_WORLD_RANKING || {});
       this.rankings = this.readStored('garlic-world-cache', this.readStored('garlic-rankings', []));
       this.rankingStatus = this.worldRanking.enabled ? '월드 랭킹을 불러오는 중…' : 'Supabase 연결 대기 중';
+      this.installPrompt = null;
       this.state = this.profile ? 'title' : 'login';
       this.stage = 1; this.plantNo = 1; this.score = 0; this.combo = 0; this.maxCombo = 0; this.harvested = 0; this.perfectCount = 0; this.lives = START_LIVES;
       this.best = Number(localStorage.getItem('garlic-best') || 0);
@@ -323,7 +324,7 @@
       this.tutorialDone = localStorage.getItem('garlic-tutorial') === '1';
       this.input = { held: false, power: 0, angle: 0, pointerId: null, x: 0, y: 0, grabX: 0, grabY: 0, grabAngle: 0, keyboard: false };
       this.keys = new Set();
-      this.bind(); this.resize(); this.updateUI();
+      this.bind(); this.resize(); this.updateUI(); this.registerServiceWorker(); this.updateInstallButton();
       $('best-score').textContent = formatCm(this.best);
       $('sound-button').classList.toggle('muted', this.sound.muted);
       if (this.profile) this.showTitle(); else this.showLogin();
@@ -361,6 +362,7 @@
       const name = this.profile?.name || '농부';
       $('farmer-name').textContent = name; $('hud-player').textContent = `· ${name}`;
       $('best-score').textContent = formatCm(this.best);
+      this.updateInstallButton();
     }
     showRanking(returnState = this.state) {
       this.rankReturnState = returnState === 'gameover' ? 'gameover' : 'title';
@@ -370,6 +372,38 @@
       if (this.rankReturnState === 'gameover') {
         this.state = 'gameover'; this.showCard('result-card');
       } else this.showTitle();
+    }
+    isStandalone() {
+      const media = typeof matchMedia === 'function' ? matchMedia('(display-mode: standalone)') : null;
+      return Boolean(media?.matches || globalThis.navigator?.standalone);
+    }
+    updateInstallButton() {
+      const button = $('install-button');
+      button.classList.toggle('hidden', !(this.installPrompt && !this.isStandalone()));
+    }
+    async installApp() {
+      if (!this.installPrompt) {
+        this.toast(this.isStandalone() ? '이미 앱처럼 실행 중이에요' : '브라우저 메뉴에서 홈 화면에 추가할 수 있어요', this.isStandalone() ? 'good' : '');
+        return;
+      }
+      const prompt = this.installPrompt;
+      this.installPrompt = null;
+      prompt.prompt();
+      let outcome = 'dismissed';
+      try {
+        const choice = await prompt.userChoice;
+        outcome = choice?.outcome || outcome;
+      } catch {}
+      this.updateInstallButton();
+      this.toast(outcome === 'accepted' ? '설치가 시작됐어요!' : '설치는 언제든 다시 할 수 있어요', outcome === 'accepted' ? 'good' : '');
+    }
+    registerServiceWorker() {
+      const nav = globalThis.navigator;
+      const protocol = globalThis.location?.protocol || '';
+      if (!nav?.serviceWorker || protocol === 'file:') return;
+      addEventListener('load', () => {
+        nav.serviceWorker.register('./sw.js').catch(() => {});
+      });
     }
     renderRanking() {
       const list = $('ranking-list');
@@ -440,10 +474,23 @@
       $('start-button').addEventListener('click', () => this.start());
       $('retry-button').addEventListener('click', () => this.start());
       $('ranking-button').addEventListener('click', () => this.showRanking('title'));
+      $('install-button').addEventListener('click', () => this.installApp());
       $('result-ranking-button').addEventListener('click', () => this.showRanking('gameover'));
       $('ranking-back-button').addEventListener('click', () => this.closeRanking());
       $('change-name-button').addEventListener('click', () => this.showLogin());
       $('skip-tutorial').addEventListener('click', () => this.finishTutorial());
+      addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        this.installPrompt = e;
+        this.updateInstallButton();
+        if (this.state === 'title') this.toast('홈 화면에 설치할 수 있어요', 'good');
+      });
+      addEventListener('appinstalled', () => {
+        this.installPrompt = null;
+        localStorage.setItem('garlic-pwa-installed', '1');
+        this.updateInstallButton();
+        this.toast('마늘밭 앱 설치 완료!', 'good');
+      });
       $('sound-button').addEventListener('click', () => {
         this.sound.muted = !this.sound.muted;
         localStorage.setItem('garlic-muted', this.sound.muted ? '1' : '0');

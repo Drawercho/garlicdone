@@ -24,7 +24,8 @@ jobs:
       - name: Prepare game files
         run: |
           mkdir _site
-          cp index.html styles.css game.js supabase-config.js _site/
+          cp index.html styles.css game.js supabase-config.js manifest.webmanifest sw.js _site/
+          cp -R icons _site/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
