@@ -139,7 +139,7 @@ assert.ok(ranking[0].cm > 0, 'ranking should save harvested centimeters');
 
 game.start();
 let simulatedSeconds = 0;
-for (let i = 0; i < 60 * 60 && !game.levelMaxed && game.state === 'playing'; i++) {
+for (let i = 0; i < 60 * 60 && !game.completed && game.state === 'playing'; i++) {
   if (!game.plant.resolved) {
     game.input.held = true;
     game.input.power = game.plant.targetForce(game.time);
@@ -148,8 +148,11 @@ for (let i = 0; i < 60 * 60 && !game.levelMaxed && game.state === 'playing'; i++
   game.update(1 / 60);
   simulatedSeconds += 1 / 60;
 }
+assert.equal(game.completed, true, 'skillful play should clear all 5 fields inside the 60-second challenge');
+assert.equal(game.harvested, 20, 'clearing all 5 fields should harvest 20 scapes');
+assert.ok(game.runTime <= 60, `all 5 fields should clear within 60 seconds, got ${game.runTime}`);
 assert.equal(game.levelMaxed, true, 'skillful play should reach max level inside the 60-second challenge');
 assert.ok(game.levelMaxTime <= 60, `max level should be reached within 60 seconds, got ${game.levelMaxTime}`);
 assert.ok(elements.get('level-label').textContent.includes('MAX'), 'HUD should show max level clearly');
 
-console.log('Smoke test passed: login, release harvest, failure, cm scoring, ranking, record storage, 60s max level, and PWA files.');
+console.log('Smoke test passed: login, release harvest, failure, cm scoring, ranking, record storage, 60s field clear, max level, and PWA files.');

@@ -11,10 +11,13 @@
   const MAX_STAGE = 5;
   const MAX_LEVEL = 10;
   const CHALLENGE_SECONDS = 60;
-  const LEVEL_THRESHOLDS = [0, 95, 200, 325, 470, 635, 815, 1015, 1245, 1500];
+  const LEVEL_THRESHOLDS = [0, 200, 440, 730, 1080, 1490, 1940, 2440, 3000, 3650];
   const RELEASE_HARVEST_MIN = .68;
   const AUTO_HARVEST_PROGRESS = 1;
   const FIELD_CLEAR_DURATION = 2.2;
+  const SUCCESS_ADVANCE_DELAY = .68;
+  const FAIL_ADVANCE_DELAY = 1.05;
+  const CHALLENGE_PULL_SPEED = 2.9;
   const FIRST_PLAY_LESSONS = [
     null,
     { title: '첫 줄기는 손맛부터', short: '잡고 위로 쭉!', copy: '손 아이콘처럼 위로 당겨보세요. 초록 구간이 넓어서 거의 바로 쑤욱 뽑혀요.' },
@@ -808,7 +811,7 @@
       const p = this.plant;
       if (p.resolved) {
         p.outcomeTime += dt; this.transitionTimer += dt;
-        if (this.transitionTimer > (p.failReason ? 1.45 : 1.7)) {
+        if (this.transitionTimer > (p.failReason ? FAIL_ADVANCE_DELAY : SUCCESS_ADVANCE_DELAY)) {
           if (this.lives <= 0) this.gameOver(); else this.nextPlant();
         }
         this.updateUI(); return;
@@ -832,7 +835,7 @@
 
       if (inZone) {
         const lessonBoost = p.lesson === 1 ? .11 : p.lesson === 2 ? .045 : p.lesson === 3 ? .02 : 0;
-        const gain = (.085 + .115 * quality + lessonBoost) * (1 + Math.min(this.stage, 10) * .012);
+        const gain = (.085 + .115 * quality + lessonBoost) * CHALLENGE_PULL_SPEED * (1 + Math.min(this.stage, 10) * .012);
         const previousStep = Math.floor(p.progress * 8);
         p.progress = clamp(p.progress + gain * dt, 0, AUTO_HARVEST_PROGRESS);
         const currentStep = Math.floor(p.progress * 8);
