@@ -8,16 +8,16 @@
   const START_LIVES = 5;
   const MAX_LIVES = 5;
   const PLANTS_PER_STAGE = 4;
-  const MAX_STAGE = 5;
+  const MAX_STAGE = 3;
   const MAX_LEVEL = 10;
   const CHALLENGE_SECONDS = 60;
-  const LEVEL_THRESHOLDS = [0, 200, 440, 730, 1080, 1490, 1940, 2440, 3000, 3650];
+  const LEVEL_THRESHOLDS = [0, 120, 260, 440, 650, 900, 1180, 1500, 1860, 2250];
   const RELEASE_HARVEST_MIN = .68;
   const AUTO_HARVEST_PROGRESS = 1;
   const FIELD_CLEAR_DURATION = 2.2;
   const SUCCESS_ADVANCE_DELAY = .68;
   const FAIL_ADVANCE_DELAY = 1.05;
-  const CHALLENGE_PULL_SPEED = 2.9;
+  const CHALLENGE_PULL_SPEED = 1.5;
   const FIRST_PLAY_LESSONS = [
     null,
     { title: '첫 줄기는 손맛부터', short: '잡고 위로 쭉!', copy: '손 아이콘처럼 위로 당겨보세요. 초록 구간이 넓어서 거의 바로 쑤욱 뽑혀요.' },
@@ -959,16 +959,16 @@
     nextGoalText(isNewBest) {
       if (this.levelMaxed && !this.completed) return `만렙 이후 목표: 남은 밭을 완주하며 ${formatCm(Math.max(this.best, this.score) + 20)} 이상 수확하기.`;
       if (!this.levelMaxed) return `다음 목표: 60초 안에 Lv.${MAX_LEVEL} 마늘쫑 장인 달성하기. 지금은 Lv.${this.level}/${MAX_LEVEL}!`;
-      if (this.completed && this.perfectCount < Math.max(8, Math.ceil(this.harvested * .5))) return '다음 목표: 만렙 완주 유지하면서 완벽 뽑기 비율 50% 넘기기.';
-      if (this.completed && this.maxCombo < PLANTS_PER_STAGE * MAX_STAGE) return '다음 목표: 끊기지 않고 20연속 콤보 완주하기.';
-      if (this.completed) return isNewBest ? '월드 랭킹용 기록감이에요. 이제 완벽 수확 수로 자기 자신과 싸워볼 차례!' : '만렙 이후 목표: 최고 cm, 완벽 수확, 20콤보를 동시에 노려보세요.';
+      if (this.completed && this.perfectCount < Math.ceil(this.harvested * .5)) return '다음 목표: 만렙 완주 유지하면서 완벽 뽑기 비율 50% 넘기기.';
+      if (this.completed && this.maxCombo < PLANTS_PER_STAGE * MAX_STAGE) return `다음 목표: 끊기지 않고 ${PLANTS_PER_STAGE * MAX_STAGE}연속 콤보 완주하기.`;
+      if (this.completed) return isNewBest ? '월드 랭킹용 기록감이에요. 이제 완벽 수확 수로 자기 자신과 싸워볼 차례!' : `만렙 이후 목표: 최고 cm, 완벽 수확, ${PLANTS_PER_STAGE * MAX_STAGE}콤보를 동시에 노려보세요.`;
       if (this.lastFailTip) return `다음 목표: ${this.lastFailTip}`;
       return `다음 목표: 밭 ${Math.min(MAX_STAGE, this.stage + 1)}까지 안정적으로 가기. 초록 구간에서 버티는 시간이 실력입니다.`;
     }
     gameOver() {
       const isNewBest = this.score > this.best;
       this.state = 'gameover'; this.saveBest(); this.saveBestStats(); this.saveRunToRanking(); this.hideTutorial();
-      $('result-title').textContent = this.levelMaxed ? '마늘쫑 장인 달성!' : this.completed ? '5개 밭 완주!' : isNewBest && this.score > 0 ? '새로운 최고 기록!' : '오늘 수확 끝!';
+      $('result-title').textContent = this.levelMaxed ? '마늘쫑 장인 달성!' : this.completed ? `${MAX_STAGE}개 밭 완주!` : isNewBest && this.score > 0 ? '새로운 최고 기록!' : '오늘 수확 끝!';
       $('final-score').textContent = formatCm(this.score);
       $('result-copy').textContent = `${this.profile?.name || '농부'}님은 ${formatTime(this.runTime)} 동안 마늘쫑 ${this.harvested}줄기를 ${formatCm(this.score)} 수확해 Lv.${this.level}/${MAX_LEVEL}, 밭 ${this.stage}/${MAX_STAGE}까지 도착했습니다.`;
       $('result-stats').innerHTML = [
@@ -1035,7 +1035,8 @@
       $('progress-fill').style.width = `${p.progress * 100}%`; $('stress-fill').style.width = `${p.stress * 100}%`;
     }
     stageTheme() {
-      const index = Math.min(STAGE_THEMES.length - 1, Math.max(0, this.stage - 1));
+      const progress = MAX_STAGE <= 1 ? 0 : (this.stage - 1) / (MAX_STAGE - 1);
+      const index = Math.min(STAGE_THEMES.length - 1, Math.max(0, Math.round(progress * (STAGE_THEMES.length - 1))));
       return STAGE_THEMES[index];
     }
     drawBackground(ctx) {
